@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: yt-transcript-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - backend-network
+    # NO ports exposed - only accessible via backend-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: yt-transcript-backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - backend-network
+      - frontend-network
+    volumes:
+      - ./backend:/app/backend:ro
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: yt-transcript-frontend
+    environment:
+      PUBLIC_API_URL: ${PUBLIC_API_URL}
+      ORIGIN: ${FRONTEND_ORIGIN}
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - frontend-network
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: yt-transcript-tunnel
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    networks:
+      - frontend-network
+
+volumes:
+  postgres_data:
+
+networks:
+  backend-network:
+    driver: bridge
+    internal: true  # This network has NO internet access
+  frontend-network:
+    driver: bridge  # This network can access internet (for Cloudflare tunnel)
