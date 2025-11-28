@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from datetime import datetime
 
 Base = declarative_base()
@@ -32,6 +33,10 @@ class Video(Base):
     duration = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Search vectors
+    title_search_vector = Column(TSVECTOR)
+    description_search_vector = Column(TSVECTOR)
+
     channel = relationship('Channel', back_populates='videos')
     transcript = relationship('Transcript', back_populates='video', uselist=False, cascade='all, delete-orphan')
     transcript_errors = relationship('TranscriptError', back_populates='video', cascade='all, delete-orphan')
@@ -46,6 +51,9 @@ class Transcript(Base):
     language_code = Column(String(10))
     is_generated = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Search vector
+    text_search_vector = Column(TSVECTOR)
 
     video = relationship('Video', back_populates='transcript')
 
