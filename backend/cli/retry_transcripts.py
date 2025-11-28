@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
 from backend.database import SessionLocal
 from backend.models import Channel, Video, Transcript, TranscriptError
 from backend.transcript_fetcher import TranscriptFetcher
-from datetime import datetime
 
 # Errors that are permanent and should not be retried
 PERMANENT_ERRORS = {
@@ -15,12 +12,29 @@ PERMANENT_ERRORS = {
     'VideoUnavailable'
 }
 
-# Errors that might be temporary and worth retrying
-RETRYABLE_ERRORS = {
-    'RequestBlocked',
-    'IpBlocked',
-    'YouTubeRequestFailed'
-}
+def progress_callback(event: str, data: dict):
+    """Print progress updates to console"""
+    if event == 'status':
+        print(f"🔍 {data['message']}")
+    elif event == 'videos_to_retry':
+        print(f"📝 Found {data['count']} videos to retry")
+    elif event == 'video_progress':
+        title = data['title'][:60]
+        print(f"[{data['current']}/{data['total']}] {title}...")
+    elif event == 'video_status':
+        status = data['status']
+        if status == 'transcript_saved':
+            print(f"  ✅ Transcript saved")
+        elif status == 'error':
+            print(f"  ❌ Failed: {data['error_type']}")
+    elif event == 'complete':
+        print("\n" + "="*60)
+        print("✅ RETRY COMPLETE!")
+        print(f"📊 Summary:")
+        print(f"   - Channel: {data['channel_name']}")
+        print(f"   - Videos processed: {data['videos_processed']}")
+        print(f"   - Successfully fetched: {data['new_transcripts']}")
+        print("="*60)
 
 def retry_missing_transcripts(
     channel_url: str = None,
@@ -33,10 +47,10 @@ def retry_missing_transcripts(
     Args:
         channel_url: Optional channel URL to filter by
         retry_all: If True, retry all videos without transcripts including those with permanent errors
-        retry_errors: Comma-separated list of specific error types to retry (e.g., 'RequestBlocked,IpBlocked')
+        retry_errors: Comma-separated list of specific error types to retry
     """
 
-    db: Session = SessionLocal()
+    db = SessionLocal()
     transcript_fetcher = TranscriptFetcher()
 
     try:
@@ -61,7 +75,6 @@ def retry_missing_transcripts(
                 error_types = [e.strip() for e in retry_errors.split(',')]
                 print(f"🎯 Only retrying videos with errors: {', '.join(error_types)}")
 
-                # Get video IDs with those specific errors
                 videos_with_errors = db.query(TranscriptError.video_id).filter(
                     TranscriptError.error_type.in_(error_types)
                 ).distinct()
@@ -70,7 +83,6 @@ def retry_missing_transcripts(
                 # Default: exclude videos with permanent errors
                 print(f"⏭️  Skipping videos with permanent errors: {', '.join(PERMANENT_ERRORS)}")
 
-                # Get video IDs with permanent errors
                 videos_with_permanent_errors = db.query(TranscriptError.video_id).filter(
                     TranscriptError.error_type.in_(PERMANENT_ERRORS)
                 ).distinct()

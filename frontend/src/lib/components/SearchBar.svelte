@@ -94,4 +94,16 @@
 		opacity: 0.6;
 		cursor: not-allowed;
 	}
+
+	@media (max-width: 768px) {
+		.search-box {
+			flex-direction: column;
+			gap: 0.75rem;
+		}
+
+		.search-input,
+		.search-button {
+			width: 100%;
+		}
+	}
 </style>

@@ -1,11 +1,16 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 from backend.database import SessionLocal
 from backend.search import SearchService
 from backend.models import Channel, Video, Transcript, TranscriptError
+from backend.services.channel_service import ChannelService
 from sqlalchemy import func
-from typing import Optional
+from typing import Optional, Dict
 import logging
+import asyncio
+import json
+import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -196,3 +201,196 @@ async def health_check():
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
         return {"status": "unhealthy", "error": str(e)}
+
+@app.post("/api/channels/add")
+async def add_channel(channel_url: str = Query(..., description="YouTube channel URL")):
+    """
+    Add a new channel and fetch all its videos/transcripts.
+    This is a synchronous endpoint - use WebSocket for real-time progress.
+    """
+    try:
+        db = next(get_db())
+        service = ChannelService(db)
+        result = service.add_or_update_channel(channel_url)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error adding channel: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/channels/{channel_id}/check-new")
+async def check_new_videos(channel_id: str):
+    """Check for new videos in an existing channel"""
+    try:
+        db = next(get_db())
+        service = ChannelService(db)
+        result = service.check_for_new_videos(channel_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error checking new videos: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/channels/{channel_id}/retry-failed")
+async def retry_failed(channel_id: str):
+    """Retry fetching transcripts for videos that failed"""
+    try:
+        db = next(get_db())
+        service = ChannelService(db)
+        result = service.retry_failed_transcripts(channel_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error retrying failed transcripts: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+
+    async def connect(self, job_id: str, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections[job_id] = websocket
+
+    def disconnect(self, job_id: str):
+        if job_id in self.active_connections:
+            del self.active_connections[job_id]
+
+    async def send_message(self, job_id: str, message: dict):
+        if job_id in self.active_connections:
+            try:
+                await self.active_connections[job_id].send_json(message)
+            except Exception as e:
+                logger.error(f"Error sending WebSocket message: {e}")
+                self.disconnect(job_id)
+
+manager = ConnectionManager()
+
+def create_progress_callback(job_id: str):
+    """Create a progress callback that sends updates via WebSocket"""
+    async def callback(event: str, data: dict):
+        await manager.send_message(job_id, {
+            'event': event,
+            'data': data
+        })
+
+    # Return a sync wrapper for the async callback
+    def sync_callback(event: str, data: dict):
+        # Create new event loop for this thread if needed
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        loop.run_until_complete(callback(event, data))
+
+    return sync_callback
+
+def run_channel_job(job_id: str, operation: str, db: Session, **kwargs):
+    """Run a channel operation in the background with progress updates"""
+    try:
+        callback = create_progress_callback(job_id)
+        service = ChannelService(db, progress_callback=callback)
+
+        if operation == 'add_channel':
+            service.add_or_update_channel(kwargs['channel_url'])
+        elif operation == 'check_new':
+            service.check_for_new_videos(kwargs['channel_id'])
+        elif operation == 'retry_failed':
+            service.retry_failed_transcripts(kwargs['channel_id'])
+
+    except Exception as e:
+        logger.error(f"Job {job_id} failed: {e}")
+        callback('error', {'message': str(e)})
+    finally:
+        db.close()
+
+@app.websocket("/ws/channel-job/{job_id}")
+async def websocket_channel_job(websocket: WebSocket, job_id: str):
+    """WebSocket endpoint for real-time channel operation updates"""
+    await manager.connect(job_id, websocket)
+    try:
+        # Keep connection open and wait for messages
+        while True:
+            data = await websocket.receive_text()
+            # Client can send "ping" to keep connection alive
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        manager.disconnect(job_id)
+
+@app.post("/api/channels/add-async")
+async def add_channel_async(
+    background_tasks: BackgroundTasks,
+    channel_url: str = Query(..., description="YouTube channel URL")
+):
+    """
+    Add a new channel asynchronously with WebSocket progress updates.
+    Returns a job_id to connect to via WebSocket.
+    """
+    job_id = str(uuid.uuid4())
+    db = SessionLocal()
+
+    # Start background task
+    background_tasks.add_task(
+        run_channel_job,
+        job_id=job_id,
+        operation='add_channel',
+        db=db,
+        channel_url=channel_url
+    )
+
+    return {
+        'job_id': job_id,
+        'websocket_url': f'/ws/channel-job/{job_id}'
+    }
+
+@app.post("/api/channels/{channel_id}/check-new-async")
+async def check_new_videos_async(
+    background_tasks: BackgroundTasks,
+    channel_id: str
+):
+    """Check for new videos asynchronously with WebSocket progress updates"""
+    job_id = str(uuid.uuid4())
+    db = SessionLocal()
+
+    background_tasks.add_task(
+        run_channel_job,
+        job_id=job_id,
+        operation='check_new',
+        db=db,
+        channel_id=channel_id
+    )
+
+    return {
+        'job_id': job_id,
+        'websocket_url': f'/ws/channel-job/{job_id}'
+    }
+
+@app.post("/api/channels/{channel_id}/retry-failed-async")
+async def retry_failed_async(
+    background_tasks: BackgroundTasks,
+    channel_id: str
+):
+    """Retry failed transcripts asynchronously with WebSocket progress updates"""
+    job_id = str(uuid.uuid4())
+    db = SessionLocal()
+
+    background_tasks.add_task(
+        run_channel_job,
+        job_id=job_id,
+        operation='retry_failed',
+        db=db,
+        channel_id=channel_id
+    )
+
+    return {
+        'job_id': job_id,
+        'websocket_url': f'/ws/channel-job/{job_id}'
+    }

@@ -12,7 +12,9 @@
 	function getYouTubeUrl(videoId: string, timestamp: number | null): string {
 		const baseUrl = `https://youtube.com/watch?v=${videoId}`;
 		if (timestamp !== null) {
-			return `${baseUrl}&t=${Math.floor(timestamp)}s`;
+			// Start 3 seconds before the match for context
+			const adjustedTimestamp = Math.max(0, Math.floor(timestamp) - 3);
+			return `${baseUrl}&t=${adjustedTimestamp}s`;
 		}
 		return baseUrl;
 	}
@@ -156,5 +158,30 @@
 	.watch-link:hover {
 		color: #ffa500;
 		text-decoration: underline;
+	}
+
+	@media (max-width: 768px) {
+		.result-card {
+			flex-direction: column;
+			gap: 1rem;
+		}
+
+		.result-number {
+			font-size: 1.5rem;
+			min-width: auto;
+			text-align: left;
+		}
+
+		.title {
+			font-size: 1.1rem;
+		}
+
+		.meta {
+			font-size: 0.85rem;
+		}
+
+		.snippet {
+			font-size: 0.95rem;
+		}
 	}
 </style>
