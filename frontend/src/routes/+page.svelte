@@ -1,84 +1,52 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import SearchBar from '$lib/components/SearchBar.svelte';
-	import SearchResults from '$lib/components/SearchResults.svelte';
-	import ChannelFilter from '$lib/components/ChannelFilter.svelte';
 	import { PUBLIC_API_URL } from '$env/static/public';
+	import { goto } from '$app/navigation';
 
-	let query = '';
-	let results: any[] = [];
-	let filteredResults: any[] = [];
-	let loading = false;
+	let channels: any[] = [];
+	let filteredChannels: any[] = [];
+	let loading = true;
 	let error = '';
-	let searchCount = 0;
-	let enabledChannels: Set<string> = new Set();
+	let searchQuery = '';
 
 	$: {
-		// Get unique channels from results
-		const channels = new Set(results.map((r) => r.channel_name));
-
-		// Initialize all channels as enabled if not already set
-		if (results.length > 0 && enabledChannels.size === 0) {
-			enabledChannels = new Set(channels);
+		if (searchQuery.trim()) {
+			const query = searchQuery.toLowerCase();
+			filteredChannels = channels.filter(
+				(c) =>
+					c.channel_name.toLowerCase().includes(query) ||
+					c.description?.toLowerCase().includes(query)
+			);
+		} else {
+			filteredChannels = channels;
 		}
-
-		// Filter results based on enabled channels
-		filteredResults = results.filter((r) => enabledChannels.has(r.channel_name));
 	}
 
-	async function handleSearch(searchQuery: string) {
-		if (!searchQuery.trim()) return;
-
-		query = searchQuery;
+	async function loadChannels() {
 		loading = true;
 		error = '';
-		enabledChannels = new Set(); // Reset filters on new search
 
 		try {
-			const response = await fetch(
-				`${PUBLIC_API_URL}/api/search?q=${encodeURIComponent(searchQuery)}&limit=20`
-			);
-
-			if (!response.ok) {
-				throw new Error('Search failed');
-			}
+			const response = await fetch(`${PUBLIC_API_URL}/api/channels`);
+			if (!response.ok) throw new Error('Failed to load channels');
 
 			const data = await response.json();
-			results = data.results;
-			searchCount = data.count;
+			channels = data.channels;
 		} catch (e) {
-			error = 'Failed to search. Make sure the API is running.';
+			error = 'Failed to load channels. Make sure the API is running.';
 			console.error(e);
 		} finally {
 			loading = false;
 		}
 	}
 
-	function handleChannelToggle(event: CustomEvent<{ channel: string; enabled: boolean }>) {
-		const { channel, enabled } = event.detail;
-
-		if (enabled) {
-			enabledChannels.add(channel);
-		} else {
-			enabledChannels.delete(channel);
-		}
-
-		// Create a new Set to trigger reactivity
-		enabledChannels = new Set(enabledChannels);
+	function handleChannelClick(channelId: string) {
+		goto(`/channel/${channelId}`);
 	}
 
-	// Get channel stats for filter
-	function getChannelStats() {
-		const stats = new Map<string, number>();
-		results.forEach((r) => {
-			stats.set(r.channel_name, (stats.get(r.channel_name) || 0) + 1);
-		});
-		return Array.from(stats.entries()).map(([name, count]) => ({
-			name,
-			count,
-			enabled: enabledChannels.has(name)
-		}));
-	}
+	onMount(() => {
+		loadChannels();
+	});
 </script>
 
 <svelte:head>
@@ -89,55 +57,69 @@
 	<div class="container">
 		<header>
 			<h1>YouTube Transcript Search</h1>
-			<p class="tagline">Find that video you're thinking of</p>
-			<a href="/channels" class="channels-link">Manage Channels →</a>
+			<p class="tagline">Search transcripts across your favorite channels</p>
 		</header>
 
-		<SearchBar on:search={(e) => handleSearch(e.detail)} {loading} />
+		<div class="search-container">
+			<input
+				type="text"
+				bind:value={searchQuery}
+				placeholder="Search channels..."
+				class="channel-search"
+			/>
+		</div>
 
 		{#if error}
 			<div class="error">{error}</div>
 		{/if}
 
-		{#if query && !loading && results.length > 0}
-			<div class="results-layout">
-				<aside class="filters">
-					<ChannelFilter
-						channels={getChannelStats()}
-						on:toggle={handleChannelToggle}
-					/>
-				</aside>
-				<div class="results-content">
-					<div class="results-info">
-						Showing {filteredResults.length} of {searchCount} result{searchCount !== 1 ? 's' : ''} for "{query}"
-					</div>
-					<SearchResults results={filteredResults} {loading} />
-				</div>
-			</div>
-		{:else if query && !loading && results.length === 0}
-			<div class="results-info">
-				Found 0 results for "{query}"
+		{#if loading}
+			<div class="loading">Loading channels...</div>
+		{:else}
+			<div class="channels-grid">
+				{#each filteredChannels as channel}
+					<button class="channel-card" on:click={() => handleChannelClick(channel.channel_id)}>
+						<h3>{channel.channel_name}</h3>
+						{#if channel.description}
+							<p class="description">{channel.description.substring(0, 150)}...</p>
+						{/if}
+						<div class="stats">
+							<div class="stat">
+								<span class="stat-value">{channel.video_count}</span>
+								<span class="stat-label">videos</span>
+							</div>
+							<div class="stat">
+								<span class="stat-value">{channel.transcript_count}</span>
+								<span class="stat-label">transcripts</span>
+							</div>
+							<div class="stat">
+								<span class="stat-value">
+									{channel.video_count > 0
+										? Math.round((channel.transcript_count / channel.video_count) * 100)
+										: 0}%
+								</span>
+								<span class="stat-label">coverage</span>
+							</div>
+						</div>
+					</button>
+				{/each}
 			</div>
 		{/if}
+
+		<div class="manage-link">
+			<a href="/channels">Manage Channels →</a>
+		</div>
 	</div>
 </main>
 
 <style>
-	:global(body) {
-		margin: 0;
-		padding: 0;
-		background: #2a1810;
-		color: #f4e4d4;
-		font-family: 'Courier New', monospace;
-		min-height: 100vh;
-	}
 
 	main {
 		padding: 2rem 1rem;
 	}
 
 	.container {
-		max-width: 1400px;
+		max-width: 1200px;
 		margin: 0 auto;
 	}
 
@@ -160,49 +142,122 @@
 		margin-top: 0.5rem;
 	}
 
-	.channels-link {
-		display: block;
-		text-align: center;
-		color: #d4a574;
-		text-decoration: none;
-		font-size: 1rem;
-		margin-top: 1rem;
+	.search-container {
+		margin-bottom: 2rem;
 	}
 
-	.channels-link:hover {
-		color: #ff8c42;
+	.channel-search {
+		width: 100%;
+		padding: 1rem 1.5rem;
+		font-size: 1.1rem;
+		font-family: 'Courier New', monospace;
+		background: #1a0f08;
+		color: #f4e4d4;
+		border: 3px solid #ff8c42;
+		outline: none;
+		box-shadow: 8px 8px 0 #1a0f08;
+	}
+
+	.channel-search::placeholder {
+		color: #8b7355;
+	}
+
+	.channel-search:focus {
+		border-color: #ffa500;
+		background: #241610;
 	}
 
 	.error {
 		background: #8b0000;
 		color: #fff;
 		padding: 1rem;
-		border-radius: 4px;
 		margin: 1rem 0;
 		border: 2px solid #ff6b6b;
 	}
 
-	.results-layout {
-		display: grid;
-		grid-template-columns: 250px 1fr;
-		gap: 2rem;
-		margin-top: 1.5rem;
-	}
-
-	.filters {
-		position: sticky;
-		top: 2rem;
-		align-self: start;
-	}
-
-	.results-content {
-		min-width: 0;
-	}
-
-	.results-info {
+	.loading {
+		text-align: center;
+		padding: 3rem;
 		color: #d4a574;
-		margin: 1.5rem 0 1rem 0;
-		font-size: 0.95rem;
+		font-size: 1.2rem;
+	}
+
+	.channels-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+		gap: 1.5rem;
+		margin-bottom: 3rem;
+	}
+
+	.channel-card {
+		background: #1a0f08;
+		border: 3px solid #8b4513;
+		padding: 1.5rem;
+		text-align: left;
+		cursor: pointer;
+		transition: all 0.2s;
+		box-shadow: 6px 6px 0 #0f0805;
+		width: 100%;
+		font-family: 'Courier New', monospace;
+	}
+
+	.channel-card:hover {
+		border-color: #ff8c42;
+		transform: translate(-2px, -2px);
+		box-shadow: 8px 8px 0 #0f0805;
+	}
+
+	h3 {
+		color: #ffa500;
+		margin: 0 0 1rem 0;
+		font-size: 1.3rem;
+	}
+
+	.description {
+		color: #d4a574;
+		font-size: 0.9rem;
+		line-height: 1.5;
+		margin: 0 0 1rem 0;
+	}
+
+	.stats {
+		display: flex;
+		gap: 1rem;
+		padding-top: 1rem;
+		border-top: 2px solid #8b4513;
+	}
+
+	.stat {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+	}
+
+	.stat-value {
+		font-size: 1.5rem;
+		color: #ff8c42;
+		font-weight: bold;
+	}
+
+	.stat-label {
+		font-size: 0.75rem;
+		color: #8b7355;
+		text-transform: uppercase;
+	}
+
+	.manage-link {
+		text-align: center;
+		padding: 2rem 0;
+	}
+
+	.manage-link a {
+		color: #d4a574;
+		text-decoration: none;
+		font-size: 1.1rem;
+	}
+
+	.manage-link a:hover {
+		color: #ff8c42;
 	}
 
 	@media (max-width: 768px) {
@@ -210,17 +265,8 @@
 			font-size: 2rem;
 		}
 
-		.tagline {
-			font-size: 1rem;
-		}
-
-		.results-layout {
+		.channels-grid {
 			grid-template-columns: 1fr;
-		}
-
-		.filters {
-			position: static;
-			margin-bottom: 1rem;
 		}
 	}
 </style>
