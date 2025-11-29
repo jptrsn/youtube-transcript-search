@@ -298,9 +298,12 @@ def create_progress_callback(job_id: str):
 
 def run_channel_job(job_id: str, operation: str, db: Session, **kwargs):
     """Run a channel operation in the background with progress updates"""
+    logger.info(f"run_channel_job STARTED: job_id={job_id}, operation={operation}, kwargs={kwargs}")
     try:
         callback = create_progress_callback(job_id)
         service = ChannelService(db, progress_callback=callback)
+
+        logger.info(f"About to execute operation: {operation}")
 
         if operation == 'add_channel':
             service.add_or_update_channel(kwargs['channel_url'])
@@ -311,10 +314,13 @@ def run_channel_job(job_id: str, operation: str, db: Session, **kwargs):
         elif operation == 'retry_failed':
             service.retry_failed_transcripts(kwargs['channel_id'])
         elif operation == 'fetch_missing':
+            logger.info(f"Calling fetch_missing_transcripts for channel {kwargs['channel_id']}")
             service.fetch_missing_transcripts(kwargs['channel_id'], kwargs.get('limit'))
 
+        logger.info(f"Job {job_id} completed successfully")
+
     except Exception as e:
-        logger.error(f"Job {job_id} failed: {e}")
+        logger.error(f"Job {job_id} failed: {e}", exc_info=True)
         callback('error', {'message': str(e)})
     finally:
         db.close()
@@ -394,9 +400,11 @@ async def retry_failed_async(
     background_tasks: BackgroundTasks,
     channel_id: str
 ):
-    """Retry failed transcripts asynchronously with WebSocket progress updates"""
+    """Retry failed transcripts asynchronously"""
     job_id = str(uuid.uuid4())
     db = SessionLocal()
+
+    logger.info(f"Starting retry_failed job {job_id} for channel {channel_id}")
 
     background_tasks.add_task(
         run_channel_job,
@@ -526,6 +534,8 @@ async def fetch_missing_async(
     """Fetch transcripts for videos that haven't been attempted yet"""
     job_id = str(uuid.uuid4())
     db = SessionLocal()
+
+    logger.info(f"Starting fetch_missing job {job_id} for channel {channel_id}")
 
     background_tasks.add_task(
         run_channel_job,

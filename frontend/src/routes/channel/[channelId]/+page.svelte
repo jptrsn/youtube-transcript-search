@@ -124,7 +124,7 @@
 
 	function connectWebSocket(jid: string) {
 		const wsUrl = API_URL.replace('http', 'ws');
-		const ws = new WebSocket(`${wsUrl}/api/ws/${jid}`);
+		const ws = new WebSocket(`${wsUrl}/ws/channel-job/${jid}`);
 
 		ws.onmessage = (event) => {
 			const message = JSON.parse(event.data);
@@ -170,7 +170,7 @@
 
 	async function retryFailedTranscripts() {
 		try {
-			const res = await fetch(`${API_URL}/api/channels/${channelId}/retry-async`, {
+			const res = await fetch(`${API_URL}/api/channels/${channelId}/retry-failed-async`, {
 				method: 'POST'
 			});
 
@@ -224,7 +224,10 @@
 		<div class="error">{error}</div>
 	{:else if channel}
 		<div class="channel-header">
-			<h1>{channel.channel_name}</h1>
+			<header>
+				<h1>{channel.channel_name}</h1>
+				<a href="/" class="back-link">← Back to Channels List</a>
+			</header>
 			{#if channel.description}
 				<p class="description">{channel.description}</p>
 			{/if}
@@ -317,6 +320,19 @@
 		margin-bottom: 2rem;
 		padding-bottom: 2rem;
 		border-bottom: 3px solid #8b4513;
+	}
+
+	header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 3rem;
+	}
+
+	.back-link {
+		color: #d4a574;
+		text-decoration: none;
+		font-size: 1.1rem;
 	}
 
 	h1 {
