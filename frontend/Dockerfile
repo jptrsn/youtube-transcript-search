@@ -11,6 +11,10 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Build argument for API URL (can be overridden at build time)
+ARG PUBLIC_API_URL=http://localhost:8000
+ENV PUBLIC_API_URL=$PUBLIC_API_URL
+
 # Build the app
 RUN npm run build
 
@@ -25,5 +29,7 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 
 EXPOSE 3000
+
+ENV NODE_ENV=production
 
 CMD ["node", "build/index.js"]

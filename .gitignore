@@ -1,8 +1,13 @@
+# Root .gitignore
 venv/
 __pycache__/
 *.pyc
 .env
+.env.*
+!.env.example
 *.db
 .DS_Store
 node_modules/
 postgres_data/
+alembic/versions/__pycache__/
+*.sql
