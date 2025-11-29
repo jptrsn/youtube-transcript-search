@@ -6,7 +6,7 @@
 	import SearchResults from '$lib/components/SearchResults.svelte';
 	import ProgressDisplay from '$lib/components/ProgressDisplay.svelte';
 
-	const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+	const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000';
 
 	let channel: any = null;
 	let videos: any[] = [];
@@ -60,27 +60,28 @@
 	}
 
 	async function autoAddChannel() {
-		try {
-			const res = await fetch(`${API_URL}/api/channels/add-limited-async`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					channel_url: `https://youtube.com/channel/${channelId}`,
-					transcript_limit: 5
-				})
-			});
+    try {
+        const params = new URLSearchParams({
+            channel_url: `https://youtube.com/channel/${channelId}`,
+            transcript_limit: '5'
+        });
 
-			if (!res.ok) throw new Error('Failed to add channel');
+        const res = await fetch(`${API_URL}/api/channels/add-limited-async?${params}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
 
-			const data = await res.json();
-			jobId = data.job_id;
-			showProgress = true;
+        if (!res.ok) throw new Error('Failed to add channel');
 
-			connectWebSocket(jobId);
-		} catch (err: any) {
-			error = err.message;
-			loading = false;
-		}
+        const data = await res.json();
+        jobId = data.job_id;
+        showProgress = true;
+
+        connectWebSocket(jobId);
+    } catch (err: any) {
+        error = err.message;
+        loading = false;
+    }
 	}
 
 	async function performSearch(query: string) {

@@ -116,3 +116,37 @@ class YouTubeClient:
             print(f"Error fetching videos: {e}")
 
         return videos
+
+    def resolve_handle(self, handle: str) -> Optional[str]:
+        """Resolve a YouTube handle (@username) to channel ID"""
+        try:
+            # Remove @ if present
+            clean_handle = handle.lstrip('@')
+
+            # Try as username first (legacy /user/ URLs)
+            request = self.youtube.channels().list(
+                part='id',
+                forUsername=clean_handle
+            )
+            response = request.execute()
+
+            if response.get('items'):
+                return response['items'][0]['id']
+
+            # If that didn't work, search for the handle
+            request = self.youtube.search().list(
+                part='snippet',
+                q=clean_handle,
+                type='channel',
+                maxResults=1
+            )
+            response = request.execute()
+
+            if response.get('items'):
+                return response['items'][0]['snippet']['channelId']
+
+            return None
+
+        except HttpError as e:
+            print(f"Error resolving handle {handle}: {e}")
+            return None

@@ -5,6 +5,7 @@ from backend.database import SessionLocal
 from backend.search import SearchService
 from backend.models import Channel, Video, Transcript, TranscriptError
 from backend.services.channel_service import ChannelService
+from backend.youtube_client import YouTubeClient
 from sqlalchemy import func
 from typing import Optional, Dict
 import logging
@@ -539,3 +540,23 @@ async def fetch_missing_async(
         'job_id': job_id,
         'websocket_url': f'/ws/channel-job/{job_id}'
     }
+
+@app.get("/api/channels/resolve-handle/{handle}")
+async def resolve_handle(handle: str):
+    """Resolve a YouTube handle (@username) to channel ID"""
+    try:
+        youtube_client = YouTubeClient()
+        channel_id = youtube_client.resolve_handle(handle)
+
+        if not channel_id:
+            raise HTTPException(status_code=404, detail="Channel not found")
+
+        return {
+            "handle": handle,
+            "channel_id": channel_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resolving handle: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

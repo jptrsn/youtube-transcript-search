@@ -11,11 +11,13 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build argument for API URL (can be overridden at build time)
+# Build argument for API URL
 ARG PUBLIC_API_URL=http://localhost:8000
+
+# Set as environment variable for the build process
 ENV PUBLIC_API_URL=$PUBLIC_API_URL
 
-# Build the app
+# Build the app - this bakes PUBLIC_API_URL into the client bundle
 RUN npm run build
 
 # Production stage
