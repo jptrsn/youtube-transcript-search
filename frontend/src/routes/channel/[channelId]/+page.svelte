@@ -108,7 +108,6 @@
 
 	function handleSearch(event: CustomEvent<{ query: string }>) {
 		const query = event.detail.query;
-		searchQuery = query;
 
 		// Update URL with search params
 		const url = new URL(window.location.href);
@@ -119,7 +118,7 @@
 		}
 		goto(url.pathname + url.search, { replaceState: true, noScroll: true });
 
-		performSearch(query);
+		// Don't call performSearch here - let the reactive statement handle it
 	}
 
 	function connectWebSocket(jid: string) {
@@ -129,18 +128,22 @@
 		ws.onmessage = (event) => {
 			const message = JSON.parse(event.data);
 
-			if (message.event === 'progress') {
-				jobProgress = [...jobProgress, message];
-			} else if (message.event === 'complete') {
-				jobProgress = [...jobProgress, message];
+			// Add all messages to progress array
+			jobProgress = [...jobProgress, message];
+
+			// Handle specific events
+			if (message.event === 'complete') {
 				setTimeout(() => {
 					showProgress = false;
+					jobProgress = []; // Reset progress
 					loadChannel();
-				}, 2000);
+				}, 3000);
 			} else if (message.event === 'error') {
-				jobProgress = [...jobProgress, message];
-				error = message.data.error;
-				showProgress = false;
+				error = message.data.message;
+				setTimeout(() => {
+					showProgress = false;
+					jobProgress = []; // Reset progress
+				}, 3000);
 			}
 		};
 
@@ -186,6 +189,24 @@
 		}
 	}
 
+	async function checkNewVideos() {
+    try {
+        const res = await fetch(`${API_URL}/api/channels/${channelId}/check-new-async`, {
+            method: 'POST'
+        });
+
+        if (!res.ok) throw new Error('Failed to start job');
+
+        const data = await res.json();
+        jobId = data.job_id;
+        showProgress = true;
+
+        connectWebSocket(jobId);
+    } catch (err: any) {
+        error = err.message;
+    }
+	}
+
 	function getStatusBadge(video: any) {
 		if (video.has_transcript) {
 			return { text: '✓ Transcript', class: 'badge-success' };
@@ -196,9 +217,12 @@
 		}
 	}
 
+	let mounted = false;
+
 	// On mount, load channel and perform search if query in URL
 	onMount(() => {
 		console.log('onMount called, channelId:', channelId);
+		mounted = true;
 		loadChannel();
 		if (urlSearchQuery) {
 			searchQuery = urlSearchQuery;
@@ -206,8 +230,8 @@
 		}
 	});
 
-	// Watch for URL param changes (e.g., browser back/forward)
-	$: if (urlSearchQuery !== searchQuery) {
+	// Watch for URL param changes (e.g., browser back/forward) - only after mount
+	$: if (mounted && urlSearchQuery !== searchQuery) {
 		searchQuery = urlSearchQuery;
 		if (urlSearchQuery) {
 			performSearch(urlSearchQuery);
@@ -239,12 +263,15 @@
 				<span>{channel.coverage_percent}% coverage</span>
 			</div>
 			<div class="actions">
-				<button on:click={fetchMissingTranscripts} class="btn-secondary">
+				<!-- <button on:click={fetchMissingTranscripts} class="btn-secondary">
 					Fetch Missing Transcripts
-				</button>
-				<button on:click={retryFailedTranscripts} class="btn-secondary">
+				</button> -->
+				<!-- <button on:click={retryFailedTranscripts} class="btn-secondary">
 					Retry Failed Transcripts
-				</button>
+				</button> -->
+				<button on:click={checkNewVideos} class="btn-secondary">
+					Check for New Videos
+			</button>
 			</div>
 		</div>
 

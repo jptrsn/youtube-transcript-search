@@ -55,7 +55,9 @@
 	}
 
 	$: latestMessage = progress.length > 0 ? progress[progress.length - 1] : null;
-	$: videoProgress = progress.find((p) => p.event === 'video_progress')?.data || null;
+
+	// Find the LAST video_progress event, not the first
+	$: videoProgress = progress.slice().reverse().find((p) => p.event === 'video_progress')?.data || null;
 </script>
 
 <div class="progress-display">

@@ -11,6 +11,10 @@ from youtube_transcript_api._errors import (
 from typing import Optional, Dict, Tuple
 import time
 
+class IpBlockedException(Exception):
+    """Raised when IP is blocked - should stop all transcript fetching"""
+    pass
+
 class TranscriptFetcher:
     def __init__(self):
         self.api = YouTubeTranscriptApi()
@@ -23,6 +27,9 @@ class TranscriptFetcher:
             Tuple of (transcript_data, error_data)
             - transcript_data: Dict with 'text', 'snippets', 'language_code', 'is_generated' or None
             - error_data: Dict with 'error_type' and 'error_message' or None
+
+        Raises:
+            IpBlockedException: When IP is blocked - caller should stop all processing
         """
         retry_delay = 10  # Start with 10 seconds
 
@@ -41,8 +48,18 @@ class TranscriptFetcher:
                     'is_generated': transcript.is_generated
                 }, None
 
-            except (RequestBlocked, IpBlocked, YouTubeRequestFailed) as e:
-                # These likely indicate rate limiting or blocking
+            except (RequestBlocked) as e:
+                # IP is blocked - raise exception to stop all processing
+                print(f"  ❌ Request blocked for video {video_id} - stopping all transcript fetching")
+                raise IpBlockedException(f"IP is blocked: {str(e)}")
+
+            except (IpBlocked) as e:
+                # IP is blocked - raise exception to stop all processing
+                print(f"  ❌ IP blocked for video {video_id} - stopping all transcript fetching")
+                raise IpBlockedException(f"IP is blocked: {str(e)}")
+
+            except (YouTubeRequestFailed) as e:
+                # These might be temporary - retry with backoff
                 if attempt < max_retries - 1:
                     print(f"  ⏸️  Request blocked/rate limited ({type(e).__name__}). Waiting {retry_delay} seconds before retry {attempt + 1}/{max_retries}...")
                     time.sleep(retry_delay)

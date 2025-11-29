@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from backend.models import Channel, Video, Transcript, TranscriptError
 from backend.youtube_client import YouTubeClient
-from backend.transcript_fetcher import TranscriptFetcher
+from backend.transcript_fetcher import TranscriptFetcher, IpBlockedException
 from typing import Callable, Optional, Dict, Any
 
 class ChannelService:
@@ -90,6 +90,7 @@ class ChannelService:
         new_videos = 0
         updated_videos = 0
         new_transcripts = 0
+        stopped_early = False
 
         for idx, video_data in enumerate(videos, 1):
             video_id = video_data['video_id']
@@ -134,7 +135,15 @@ class ChannelService:
 
             # Fetch transcript
             self._emit('video_status', {'status': 'fetching_transcript'})
-            transcript_data, error_data = self.transcript_fetcher.fetch_transcript(video_id)
+
+            try:
+                transcript_data, error_data = self.transcript_fetcher.fetch_transcript(video_id)
+            except IpBlockedException as e:
+                self._emit('error', {
+                    'message': f'IP blocked after processing {idx} videos. Stopping transcript fetching.'
+                })
+                stopped_early = True
+                break
 
             if transcript_data:
                 db_transcript = Transcript(
@@ -173,7 +182,8 @@ class ChannelService:
             'total_videos': len(videos),
             'new_videos': new_videos,
             'updated_videos': updated_videos,
-            'new_transcripts': new_transcripts
+            'new_transcripts': new_transcripts,
+            'stopped_early': stopped_early
         }
 
         self._emit('complete', summary)
@@ -216,7 +226,7 @@ class ChannelService:
 
         return self._process_videos(channel, new_videos)
 
-    def retry_failed_transcripts(self, channel_id: str) -> Dict[str, Any]:
+    def retry_failed_transcripts(self, channel_id: str, limit: Optional[int] = None) -> Dict[str, Any]:
         """Retry fetching transcripts for videos that failed"""
         channel = self.db.query(Channel).filter(
             Channel.channel_id == channel_id
@@ -234,15 +244,22 @@ class ChannelService:
             TranscriptError.error_type.in_(RETRYABLE_ERRORS)
         ).distinct().subquery()
 
-        videos_to_retry = self.db.query(Video).outerjoin(Transcript).filter(
+        query = self.db.query(Video).outerjoin(Transcript).filter(
             Video.channel_id == channel.id,
             Transcript.id == None,
             Video.id.in_(videos_with_errors)
-        ).all()
+        )
+
+        # Add limit if specified
+        if limit:
+            query = query.limit(limit)
+
+        videos_to_retry = query.all()
 
         self._emit('videos_to_retry', {'count': len(videos_to_retry)})
 
         success_count = 0
+        stopped_early = False
 
         for idx, video in enumerate(videos_to_retry, 1):
             self._emit('video_progress', {
@@ -252,7 +269,14 @@ class ChannelService:
                 'title': video.title
             })
 
-            transcript_data, error_data = self.transcript_fetcher.fetch_transcript(video.video_id)
+            try:
+                transcript_data, error_data = self.transcript_fetcher.fetch_transcript(video.video_id)
+            except IpBlockedException as e:
+                self._emit('error', {
+                    'message': f'IP blocked after processing {idx} videos. Stopping transcript fetching.'
+                })
+                stopped_early = True
+                break
 
             if transcript_data:
                 db_transcript = Transcript(
@@ -271,7 +295,10 @@ class ChannelService:
 
                 self.db.commit()
                 success_count += 1
-                self._emit('video_status', {'status': 'transcript_saved'})
+                self._emit('video_status', {
+                    'status': 'transcript_saved',
+                    'length': len(transcript_data['text'])
+                })
             elif error_data:
                 # Update error
                 db_error = TranscriptError(
@@ -288,8 +315,9 @@ class ChannelService:
 
         summary = {
             'channel_name': channel.channel_name,
-            'videos_processed': len(videos_to_retry),
-            'new_transcripts': success_count
+            'videos_processed': len(videos_to_retry) if not stopped_early else idx,
+            'new_transcripts': success_count,
+            'stopped_early': stopped_early
         }
 
         self._emit('complete', summary)
@@ -374,6 +402,7 @@ class ChannelService:
             # Fetch transcripts for first N videos only
             videos_to_scrape = videos[:transcript_limit]
             new_transcripts = 0
+            stopped_early = False
 
             for idx, video_data in enumerate(videos_to_scrape, 1):
                 video_id = video_data['video_id']
@@ -401,7 +430,15 @@ class ChannelService:
 
                 # Fetch transcript
                 self._emit('video_status', {'status': 'fetching_transcript'})
-                transcript_data, error_data = self.transcript_fetcher.fetch_transcript(video_id)
+
+                try:
+                    transcript_data, error_data = self.transcript_fetcher.fetch_transcript(video_id)
+                except IpBlockedException as e:
+                    self._emit('error', {
+                        'message': f'IP blocked after processing {idx} videos. Stopping transcript fetching.'
+                    })
+                    stopped_early = True
+                    break
 
                 if transcript_data:
                     db_transcript = Transcript(
@@ -441,7 +478,8 @@ class ChannelService:
                 'total_videos': len(videos),
                 'new_videos': new_videos,
                 'new_transcripts': new_transcripts,
-                'transcripts_scraped': len(videos_to_scrape)
+                'transcripts_scraped': len(videos_to_scrape) if not stopped_early else idx,
+                'stopped_early': stopped_early
             }
 
             self._emit('complete', summary)
@@ -489,6 +527,7 @@ class ChannelService:
             return summary
 
         success_count = 0
+        stopped_early = False
 
         for idx, video in enumerate(videos_to_fetch, 1):
             self._emit('video_progress', {
@@ -498,7 +537,14 @@ class ChannelService:
                 'title': video.title
             })
 
-            transcript_data, error_data = self.transcript_fetcher.fetch_transcript(video.video_id)
+            try:
+                transcript_data, error_data = self.transcript_fetcher.fetch_transcript(video.video_id)
+            except IpBlockedException as e:
+                self._emit('error', {
+                    'message': f'IP blocked after processing {idx} videos. Stopping transcript fetching.'
+                })
+                stopped_early = True
+                break
 
             if transcript_data:
                 db_transcript = Transcript(
@@ -511,7 +557,10 @@ class ChannelService:
                 self.db.add(db_transcript)
                 self.db.commit()
                 success_count += 1
-                self._emit('video_status', {'status': 'transcript_saved'})
+                self._emit('video_status', {
+                    'status': 'transcript_saved',
+                    'length': len(transcript_data['text'])
+                })
             elif error_data:
                 db_error = TranscriptError(
                     video_id=video.id,
@@ -527,8 +576,9 @@ class ChannelService:
 
         summary = {
             'channel_name': channel.channel_name,
-            'videos_processed': len(videos_to_fetch),
-            'new_transcripts': success_count
+            'videos_processed': len(videos_to_fetch) if not stopped_early else idx,
+            'new_transcripts': success_count,
+            'stopped_early': stopped_early
         }
 
         self._emit('complete', summary)

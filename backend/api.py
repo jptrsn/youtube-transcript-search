@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from backend.database import SessionLocal
@@ -13,6 +13,8 @@ import asyncio
 import json
 import uuid
 import queue
+from datetime import datetime, timezone
+from backend.youtube_client import YouTubeClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,7 +61,8 @@ async def search(
     q: str = Query(..., description="Search query"),
     limit: int = Query(20, ge=1, le=100, description="Maximum number of results"),
     exact_match: bool = Query(False, description="Require exact phrase match"),
-    min_similarity: float = Query(0.3, ge=0.0, le=1.0, description="Minimum similarity score for fuzzy matches")
+    min_similarity: float = Query(0.3, ge=0.0, le=1.0, description="Minimum similarity score for fuzzy matches"),
+    db: Session = Depends(get_db)
 ):
     """
     Search across video transcripts, titles, and descriptions.
@@ -67,7 +70,7 @@ async def search(
     Returns results ranked by relevance with snippets and timestamps.
     """
     try:
-        db = next(get_db())
+
         search_service = SearchService(db)
 
         results = search_service.search(
@@ -87,10 +90,9 @@ async def search(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/channels")
-async def list_channels():
+async def list_channels(db: Session = Depends(get_db)):
     """List all indexed channels"""
     try:
-        db = next(get_db())
 
         channels = db.query(
             Channel,
@@ -121,10 +123,9 @@ async def list_channels():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/channels/{channel_id}")
-async def get_channel(channel_id: str):
+async def get_channel(channel_id: str, db: Session = Depends(get_db)):
     """Get details for a specific channel"""
     try:
-        db = next(get_db())
 
         channel = db.query(Channel).filter(Channel.channel_id == channel_id).first()
 
@@ -162,10 +163,9 @@ async def get_channel(channel_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/stats")
-async def get_stats():
+async def get_stats(db: Session = Depends(get_db)):
     """Get overall statistics"""
     try:
-        db = next(get_db())
 
         channel_count = db.query(Channel).count()
         video_count = db.query(Video).count()
@@ -193,11 +193,10 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
-async def health_check():
+async def health_check(db: Session = Depends(get_db)):
     """Health check endpoint for monitoring"""
     try:
         # Test database connection
-        db = next(get_db())
         db.execute("SELECT 1")
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
@@ -205,13 +204,12 @@ async def health_check():
         return {"status": "unhealthy", "error": str(e)}
 
 @app.post("/api/channels/add")
-async def add_channel(channel_url: str = Query(..., description="YouTube channel URL")):
+async def add_channel(channel_url: str = Query(..., description="YouTube channel URL"), db: Session = Depends(get_db)):
     """
     Add a new channel and fetch all its videos/transcripts.
     This is a synchronous endpoint - use WebSocket for real-time progress.
     """
     try:
-        db = next(get_db())
         service = ChannelService(db)
         result = service.add_or_update_channel(channel_url)
         return result
@@ -221,25 +219,34 @@ async def add_channel(channel_url: str = Query(..., description="YouTube channel
         logger.error(f"Error adding channel: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/channels/{channel_id}/check-new")
-async def check_new_videos(channel_id: str):
-    """Check for new videos in an existing channel"""
-    try:
-        db = next(get_db())
-        service = ChannelService(db)
-        result = service.check_for_new_videos(channel_id)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error checking new videos: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/api/channels/{channel_id}/check-new-async")
+async def check_new_videos_async(
+    background_tasks: BackgroundTasks,
+    channel_id: str
+):
+    """Check for new videos in an existing channel asynchronously"""
+    job_id = str(uuid.uuid4())
+    db = SessionLocal()
+
+    logger.info(f"Starting check_new job {job_id} for channel {channel_id}")
+
+    background_tasks.add_task(
+        run_channel_job,
+        job_id=job_id,
+        operation='check_new',
+        db=db,
+        channel_id=channel_id
+    )
+
+    return {
+        'job_id': job_id,
+        'websocket_url': f'/ws/channel-job/{job_id}'
+    }
 
 @app.post("/api/channels/{channel_id}/retry-failed")
-async def retry_failed(channel_id: str):
+async def retry_failed(channel_id: str, db: Session = Depends(get_db)):
     """Retry fetching transcripts for videos that failed"""
     try:
-        db = next(get_db())
         service = ChannelService(db)
         result = service.retry_failed_transcripts(channel_id)
         return result
@@ -420,10 +427,9 @@ async def retry_failed_async(
     }
 
 @app.get("/api/channels/{channel_id}/details")
-async def get_channel_details(channel_id: str):
+async def get_channel_details(channel_id: str, db: Session = Depends(get_db)):
     """Get detailed channel information including video list"""
     try:
-        db = next(get_db())
 
         channel = db.query(Channel).filter(Channel.channel_id == channel_id).first()
 
@@ -468,11 +474,11 @@ async def get_channel_details(channel_id: str):
 async def search_channel(
     channel_id: str,
     q: str = Query(..., description="Search query"),
-    limit: int = Query(20, ge=1, le=100)
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
 ):
     """Search within a specific channel's transcripts"""
     try:
-        db = next(get_db())
 
         # Verify channel exists
         channel = db.query(Channel).filter(Channel.channel_id == channel_id).first()
@@ -569,4 +575,112 @@ async def resolve_handle(handle: str):
         raise
     except Exception as e:
         logger.error(f"Error resolving handle: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/videos/{video_id}/exists")
+async def check_video_exists(video_id: str, db: Session = Depends(get_db)):
+    """Check if a video exists in the database"""
+    try:
+        video = db.query(Video).filter(Video.video_id == video_id).first()
+
+        if video:
+            # Check if it has a transcript
+            has_transcript = db.query(Transcript).filter(
+                Transcript.video_id == video.id
+            ).first() is not None
+
+            return {"exists": True, "has_transcript": has_transcript}
+        else:
+            return {"exists": False, "has_transcript": False}
+
+    except Exception as e:
+        logger.error(f"Error checking video exists: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/videos/submit")
+async def submit_video_transcript(request: Request, db: Session = Depends(get_db)):
+    """Submit a video and its transcript from the browser extension"""
+    try:
+        data = await request.json()
+        video_data = data.get('video')
+        transcript_data = data.get('transcript')
+
+        if not video_data or not transcript_data:
+            raise HTTPException(status_code=400, detail="Missing video or transcript data")
+
+        # Check if channel exists, if not create it
+        channel = db.query(Channel).filter(
+            Channel.channel_id == video_data['channelId']
+        ).first()
+
+        if not channel:
+            # Create minimal channel entry
+            youtube_client = YouTubeClient()
+            channel_info = youtube_client.get_channel_info(video_data['channelId'])
+
+            if not channel_info:
+                raise HTTPException(status_code=400, detail="Could not fetch channel info")
+
+            channel = Channel(
+                channel_id=channel_info['channel_id'],
+                channel_name=channel_info['channel_name'],
+                channel_url=f"https://www.youtube.com/channel/{channel_info['channel_id']}",
+                description=channel_info.get('description', ''),
+                last_checked=datetime.now(timezone.utc)
+            )
+            db.add(channel)
+            db.commit()
+            db.refresh(channel)
+
+        # Check if video already exists
+        existing_video = db.query(Video).filter(
+            Video.video_id == video_data['videoId']
+        ).first()
+
+        if existing_video:
+            # Check if it has a transcript
+            existing_transcript = db.query(Transcript).filter(
+                Transcript.video_id == existing_video.id
+            ).first()
+
+            if existing_transcript:
+                return {"success": True, "message": "Video already has transcript"}
+
+        # Create video entry if it doesn't exist
+        if not existing_video:
+            video = Video(
+                video_id=video_data['videoId'],
+                channel_id=channel.id,
+                title=video_data['title'],
+                description=video_data.get('description', ''),
+                published_at=datetime.fromisoformat(video_data['publishedAt'].replace('Z', '+00:00')),
+                thumbnail_url=video_data.get('thumbnailUrl', '')
+            )
+            db.add(video)
+            db.commit()
+            db.refresh(video)
+        else:
+            video = existing_video
+
+        # Create transcript
+        full_text = ' '.join([seg['text'] for seg in transcript_data])
+
+        transcript = Transcript(
+            video_id=video.id,
+            text=full_text,
+            snippets=transcript_data,
+            language_code='en',
+            is_generated=False
+        )
+        db.add(transcript)
+        db.commit()
+
+        logger.info(f"Submitted transcript for video {video_data['videoId']} from extension")
+
+        return {"success": True, "message": "Transcript submitted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting transcript: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
