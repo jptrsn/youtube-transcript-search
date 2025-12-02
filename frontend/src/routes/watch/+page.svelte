@@ -113,7 +113,7 @@
 		</div>
 	{:else if video}
 		<div class="video-header">
-			<a href="/" class="back-link">← Back to Channels</a>
+			<a href="/channel/{video.channel.channel_id}" class="back-link">← Back to {video.channel.channel_name}</a>
 
 			<h1>{video.title}</h1>
 

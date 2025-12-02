@@ -38,7 +38,7 @@ ssh ${REMOTE_HOST} << 'EOF'
     docker compose -f docker-compose.prod.yml pull
 
     # Build and start services
-    docker compose -f docker-compose.prod.yml up -d --build
+    docker compose -f docker-compose.prod.yml up -d --build --force-recreate
 
     # Run migrations
     docker compose -f docker-compose.prod.yml exec -T backend python3 -m alembic upgrade head

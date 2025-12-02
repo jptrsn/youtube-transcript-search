@@ -100,16 +100,32 @@ async def search(
 async def list_channels(db: Session = Depends(get_db)):
     """List all indexed channels"""
     try:
+        from sqlalchemy import select
 
+        # Subquery for video counts
+        video_counts = select(
+            Video.channel_id,
+            func.count(Video.id).label('video_count')
+        ).group_by(Video.channel_id).subquery()
+
+        # Subquery for transcript counts
+        transcript_counts = select(
+            Video.channel_id,
+            func.count(Transcript.id).label('transcript_count')
+        ).join(
+            Transcript, Video.id == Transcript.video_id
+        ).group_by(Video.channel_id).subquery()
+
+        # Main query
         channels = db.query(
             Channel,
-            func.count(Video.id).label('video_count'),
-            func.count(Transcript.id).label('transcript_count')
+            func.coalesce(video_counts.c.video_count, 0).label('video_count'),
+            func.coalesce(transcript_counts.c.transcript_count, 0).label('transcript_count')
         ).outerjoin(
-            Video, Channel.id == Video.channel_id
+            video_counts, Channel.id == video_counts.c.channel_id
         ).outerjoin(
-            Transcript, Video.id == Transcript.video_id
-        ).group_by(Channel.id).all()
+            transcript_counts, Channel.id == transcript_counts.c.channel_id
+        ).all()
 
         result = []
         for channel, video_count, transcript_count in channels:
