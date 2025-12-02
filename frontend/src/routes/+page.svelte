@@ -145,9 +145,12 @@
 	.search-container {
 		margin-bottom: 2rem;
 	}
+	.search-container > input {
+		width: calc(100% - 3.5rem);
+	}
 
 	.channel-search {
-		width: 100%;
+		width: (100% - 3.5rem);
 		padding: 1rem 1.5rem;
 		font-size: 1.1rem;
 		font-family: 'Courier New', monospace;

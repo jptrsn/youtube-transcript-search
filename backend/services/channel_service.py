@@ -191,7 +191,7 @@ class ChannelService:
         return summary
 
     def check_for_new_videos(self, channel_id: str) -> Dict[str, Any]:
-        """Check for new videos in an existing channel"""
+        """Check for new videos in an existing channel - adds metadata only, no transcripts"""
         channel = self.db.query(Channel).filter(
             Channel.channel_id == channel_id
         ).first()
@@ -218,13 +218,53 @@ class ChannelService:
         self._emit('new_videos_found', {'count': len(new_videos)})
 
         if not new_videos:
+            channel.last_checked = datetime.utcnow()
+            self.db.commit()
             return {
                 'channel_name': channel.channel_name,
                 'new_videos': 0,
                 'new_transcripts': 0
             }
 
-        return self._process_videos(channel, new_videos)
+        # Add video metadata ONLY - don't fetch transcripts
+        new_video_count = 0
+        for idx, video_data in enumerate(new_videos, 1):
+            self._emit('video_progress', {
+                'current': idx,
+                'total': len(new_videos),
+                'video_id': video_data['video_id'],
+                'title': video_data['title']
+            })
+
+            db_video = Video(
+                channel_id=channel.id,
+                video_id=video_data['video_id'],
+                title=video_data['title'],
+                description=video_data['description'],
+                published_at=datetime.fromisoformat(video_data['published_at'].replace('Z', '+00:00')),
+                thumbnail_url=video_data['thumbnail_url']
+            )
+            self.db.add(db_video)
+            new_video_count += 1
+
+            self._emit('video_status', {'status': 'video_added'})
+
+        self.db.commit()
+
+        # Update channel last_checked
+        channel.last_checked = datetime.utcnow()
+        self.db.commit()
+
+        summary = {
+            'channel_name': channel.channel_name,
+            'new_videos': new_video_count,
+            'new_transcripts': 0,
+            'message': f'Added {new_video_count} new videos. Use "Fetch Missing Transcripts" to get their transcripts.'
+        }
+
+        self._emit('complete', summary)
+
+        return summary
 
     def retry_failed_transcripts(self, channel_id: str, limit: Optional[int] = None) -> Dict[str, Any]:
         """Retry fetching transcripts for videos that failed"""

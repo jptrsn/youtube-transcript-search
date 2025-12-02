@@ -1,7 +1,6 @@
-from sqlalchemy import func, or_, and_, case, literal_column
+from sqlalchemy import text
 from sqlalchemy.orm import Session
-from backend.models import Video, Transcript, Channel
-from typing import List, Dict, Optional
+from typing import List, Dict
 import re
 
 class SearchService:
@@ -16,353 +15,331 @@ class SearchService:
         min_similarity: float = 0.3
     ) -> List[Dict]:
         """
-        Search across video titles, descriptions, and transcripts.
-        Returns ALL matches per video, limited by number of videos.
-
-        Args:
-            query: Search query string
-            limit: Maximum number of VIDEOS to return (not total matches)
-            exact_match: If True, only return exact phrase matches
-            min_similarity: Minimum similarity score for fuzzy matches (0-1)
+        Optimized search that returns match counts and best snippet per video.
 
         Returns:
-            List of search results with video info, match location, and snippets
+            List of videos with: {
+                video_id, title, channel_name, thumbnail_url, published_at,
+                transcript_matches: int,
+                title_matches: int,
+                description_matches: int,
+                best_snippet: str,
+                best_timestamp: float,
+                rank: float
+            }
         """
-
-        # Prepare the search query for PostgreSQL full-text search
         ts_query = self._prepare_tsquery(query, exact_match)
 
-        # Search and get results grouped by video
-        transcript_results = self._search_transcripts(ts_query, query, limit, min_similarity)
-        title_results = self._search_titles(ts_query, query, limit, min_similarity)
-        description_results = self._search_descriptions(ts_query, query, limit, min_similarity)
+        # Single optimized query using UNION ALL and aggregation
+        sql = text("""
+            WITH search_results AS (
+                -- Transcript matches
+                SELECT
+                    v.id as video_id,
+                    v.video_id as video_yt_id,
+                    v.title,
+                    v.thumbnail_url,
+                    v.published_at,
+                    c.channel_name,
+                    'transcript' as match_type,
+                    ts_rank(t.text_search_vector, to_tsquery('english', :ts_query)) * 10
+                        + similarity(t.text, :original_query) * 5
+                        + CASE WHEN t.text ILIKE :like_query THEN 100 ELSE 0 END as rank,
+                    ts_headline('english', t.text, to_tsquery('english', :ts_query),
+                        'StartSel=<<, StopSel=>>, MaxWords=50, MinWords=25') as snippet,
+                    (
+                        SELECT (s->>'start')::float
+                        FROM jsonb_array_elements(t.snippets) as s
+                        WHERE lower(s->>'text') LIKE :like_query_lower
+                        LIMIT 1
+                    ) as timestamp
+                FROM videos v
+                JOIN transcripts t ON v.id = t.video_id
+                JOIN channels c ON v.channel_id = c.id
+                WHERE
+                    t.text_search_vector @@ to_tsquery('english', :ts_query)
+                    OR similarity(t.text, :original_query) > :min_similarity
+                    OR t.text ILIKE :like_query
 
-        # Combine all results
-        all_results = transcript_results + title_results + description_results
+                UNION ALL
 
-        # Group by video_id and keep all matches per video
-        videos_dict = {}
-        for result in all_results:
-            video_id = result['video_id']
-            if video_id not in videos_dict:
-                videos_dict[video_id] = {
-                    'video_id': video_id,
-                    'title': result['title'],
-                    'channel_name': result['channel_name'],
-                    'thumbnail_url': result['thumbnail_url'],
-                    'published_at': result['published_at'],
-                    'max_rank': result['rank'],
-                    'matches': []
-                }
-            else:
-                # Update max rank if this match has higher rank
-                videos_dict[video_id]['max_rank'] = max(videos_dict[video_id]['max_rank'], result['rank'])
+                -- Title matches
+                SELECT
+                    v.id,
+                    v.video_id,
+                    v.title,
+                    v.thumbnail_url,
+                    v.published_at,
+                    c.channel_name,
+                    'title',
+                    ts_rank(v.title_search_vector, to_tsquery('english', :ts_query)) * 5
+                        + similarity(v.title, :original_query) * 3 as rank,
+                    v.title as snippet,
+                    NULL as timestamp
+                FROM videos v
+                JOIN channels c ON v.channel_id = c.id
+                WHERE
+                    v.title_search_vector @@ to_tsquery('english', :ts_query)
+                    OR similarity(v.title, :original_query) > :min_similarity
 
-            videos_dict[video_id]['matches'].append({
-                'match_type': result['match_type'],
-                'snippet': result['snippet'],
-                'timestamp': result['timestamp'],
-                'rank': result['rank']
-            })
+                UNION ALL
 
-        # Convert to list and sort by max rank
-        videos_list = list(videos_dict.values())
-        videos_list.sort(key=lambda x: x['max_rank'], reverse=True)
+                -- Description matches
+                SELECT
+                    v.id,
+                    v.video_id,
+                    v.title,
+                    v.thumbnail_url,
+                    v.published_at,
+                    c.channel_name,
+                    'description',
+                    ts_rank(v.description_search_vector, to_tsquery('english', :ts_query)) * 2
+                        + similarity(v.description, :original_query) * 1 as rank,
+                    ts_headline('english', v.description, to_tsquery('english', :ts_query),
+                        'StartSel=<<, StopSel=>>, MaxWords=30, MinWords=15') as snippet,
+                    NULL as timestamp
+                FROM videos v
+                JOIN channels c ON v.channel_id = c.id
+                WHERE
+                    v.description IS NOT NULL
+                    AND (
+                        v.description_search_vector @@ to_tsquery('english', :ts_query)
+                        OR similarity(v.description, :original_query) > :min_similarity
+                    )
+            )
+            SELECT
+                video_yt_id,
+                title,
+                channel_name,
+                thumbnail_url,
+                published_at,
+                COUNT(*) FILTER (WHERE match_type = 'transcript') as transcript_matches,
+                COUNT(*) FILTER (WHERE match_type = 'title') as title_matches,
+                COUNT(*) FILTER (WHERE match_type = 'description') as description_matches,
+                MAX(rank) as max_rank,
+                (
+                    SELECT snippet
+                    FROM search_results sr2
+                    WHERE sr2.video_id = search_results.video_id
+                        AND sr2.match_type = 'transcript'
+                    ORDER BY sr2.rank DESC
+                    LIMIT 1
+                ) as best_snippet,
+                (
+                    SELECT timestamp
+                    FROM search_results sr2
+                    WHERE sr2.video_id = search_results.video_id
+                        AND sr2.match_type = 'transcript'
+                    ORDER BY sr2.rank DESC
+                    LIMIT 1
+                ) as best_timestamp
+            FROM search_results
+            GROUP BY video_id, video_yt_id, title, channel_name, thumbnail_url, published_at
+            ORDER BY max_rank DESC
+            LIMIT :limit
+        """)
 
-        # Limit to top N videos
-        top_videos = videos_list[:limit]
+        results = self.db.execute(sql, {
+            'ts_query': ts_query,
+            'original_query': query,
+            'like_query': f'%{query}%',
+            'like_query_lower': f'%{query.lower()}%',
+            'min_similarity': min_similarity,
+            'limit': limit
+        }).fetchall()
 
-        # Flatten back to individual results
-        final_results = []
-        for video in top_videos:
-            for match in video['matches']:
-                final_results.append({
-                    'video_id': video['video_id'],
-                    'title': video['title'],
-                    'channel_name': video['channel_name'],
-                    'thumbnail_url': video['thumbnail_url'],
-                    'published_at': video['published_at'],
-                    'match_type': match['match_type'],
-                    'snippet': match['snippet'],
-                    'timestamp': match['timestamp'],
-                    'rank': match['rank']
-                })
-
-        return final_results
+        return [
+            {
+                'video_id': row[0],
+                'title': row[1],
+                'channel_name': row[2],
+                'thumbnail_url': row[3],
+                'published_at': row[4].isoformat() if row[4] else None,
+                'transcript_matches': row[5] or 0,
+                'title_matches': row[6] or 0,
+                'description_matches': row[7] or 0,
+                'rank': float(row[8]) if row[8] else 0,
+                'best_snippet': row[9],
+                'best_timestamp': float(row[10]) if row[10] else None
+            }
+            for row in results
+        ]
 
     def _prepare_tsquery(self, query: str, exact_match: bool) -> str:
-      """Convert search query to PostgreSQL tsquery format"""
-      # Clean the query - remove punctuation except spaces
-      cleaned = re.sub(r"[^\w\s]", "", query)
-      words = cleaned.lower().split()
+        """Convert search query to PostgreSQL tsquery format"""
+        cleaned = re.sub(r"[^\w\s]", "", query)
+        words = cleaned.lower().split()
 
-      if not words:
-          return query.lower()
+        if not words:
+            return query.lower()
 
-      if exact_match:
-          # For exact phrase matching, use <-> operator (words must be adjacent)
-          return ' <-> '.join(words)
-      else:
-          # Default: treat multi-word queries as phrases
-          if len(words) > 1:
-              # Use <-> for phrase matching but allow some flexibility with <N>
-              return ' <-> '.join(words)
-          else:
-              # Single word - just search for that word
-              return words[0]
-
-    def _search_transcripts(
-        self,
-        ts_query: str,
-        original_query: str,
-        limit: int,
-        min_similarity: float
-    ) -> List[Dict]:
-        """Search in video transcripts - returns ALL matches within each video"""
-
-        lower_query = original_query.lower()
-
-        # Full-text search query
-        search_results = self.db.query(
-            Video,
-            Transcript,
-            Channel,
-            func.ts_rank(Transcript.text_search_vector, func.to_tsquery('english', ts_query)).label('ts_rank'),
-            func.similarity(Transcript.text, original_query).label('similarity'),
-            Transcript.text.ilike(f'%{original_query}%').label('has_phrase')
-        ).join(
-            Transcript, Video.id == Transcript.video_id
-        ).join(
-            Channel, Video.channel_id == Channel.id
-        ).filter(
-            or_(
-                Transcript.text_search_vector.op('@@')(func.to_tsquery('english', ts_query)),
-                func.similarity(Transcript.text, original_query) > min_similarity,
-                Transcript.text.ilike(f'%{original_query}%')
-            )
-        ).limit(limit * 2).all()
-
-        results = []
-        for video, transcript, channel, ts_rank, similarity, has_phrase in search_results:
-            # Calculate combined rank with HUGE boost for exact phrase matches
-            if has_phrase:
-                rank = 100 + (ts_rank * 10) + (similarity * 5)
+        if exact_match:
+            return ' <-> '.join(words)
+        else:
+            if len(words) > 1:
+                return ' <-> '.join(words)
             else:
-                rank = (ts_rank * 10) + (similarity * 5)
+                return words[0]
 
-            # Find ALL occurrences of the query in the transcript
-            matches = self._find_all_matches(transcript.text, transcript.snippets, original_query)
-
-            # Create a result for each match
-            for match in matches:
-                results.append({
-                    'video_id': video.video_id,
-                    'title': video.title,
-                    'channel_name': channel.channel_name,
-                    'thumbnail_url': video.thumbnail_url,
-                    'published_at': video.published_at.isoformat(),
-                    'match_type': 'transcript',
-                    'snippet': match['snippet'],
-                    'timestamp': match['timestamp'],
-                    'rank': rank
-                })
-
-        return results
-
-    def _find_all_matches(self, text: str, snippets: List[Dict], query: str, context_chars: int = 150) -> List[Dict]:
-        """Find all occurrences of query in text and return snippet + timestamp for each"""
-        if not text:
-            return []
-
-        lower_text = text.lower()
-        lower_query = query.lower()
-        matches = []
-
-        # Find all positions where the query appears
-        start = 0
-        while True:
-            pos = lower_text.find(lower_query, start)
-            if pos == -1:
-                break
-
-            # Extract snippet around this match
-            snippet_start = max(0, pos - context_chars)
-            snippet_end = min(len(text), pos + len(query) + context_chars)
-            snippet = text[snippet_start:snippet_end]
-
-            if snippet_start > 0:
-                snippet = "..." + snippet
-            if snippet_end < len(text):
-                snippet = snippet + "..."
-
-            # Find timestamp for this occurrence
-            timestamp = self._find_timestamp_for_position(snippets, pos, text)
-
-            matches.append({
-                'snippet': snippet.strip(),
-                'timestamp': timestamp
-            })
-
-            # Move past this occurrence
-            start = pos + len(query)
-
-        return matches if matches else [{'snippet': text[:context_chars * 2] + "...", 'timestamp': None}]
-
-    def _find_timestamp_for_position(self, snippets: List[Dict], char_position: int, full_text: str) -> Optional[float]:
-        """Find the timestamp for a character position in the full transcript text"""
-        if not snippets:
-            return None
-
-        # Build a map of character positions to timestamps
-        current_pos = 0
-        for snippet in snippets:
-            snippet_text = snippet['text']
-            snippet_len = len(snippet_text)
-
-            # Check if our position falls within this snippet
-            if current_pos <= char_position < current_pos + snippet_len:
-                return snippet['start']
-
-            current_pos += snippet_len + 1  # +1 for the space that joins snippets
-
-        # If not found, return the first snippet's timestamp
-        return snippets[0]['start'] if snippets else None
-
-    def _search_titles(
+    def search_channel(
         self,
-        ts_query: str,
-        original_query: str,
-        limit: int,
-        min_similarity: float
+        channel_id: str,
+        query: str,
+        limit: int = 20,
+        offset: int = 0,
+        exact_match: bool = False,
+        min_similarity: float = 0.3
     ) -> List[Dict]:
-        """Search in video titles"""
+        """Optimized search within a specific channel with pagination."""
+        ts_query = self._prepare_tsquery(query, exact_match)
 
-        search_results = self.db.query(
-            Video,
-            Channel,
-            func.ts_rank(Video.title_search_vector, func.to_tsquery('english', ts_query)).label('ts_rank'),
-            func.similarity(Video.title, original_query).label('similarity')
-        ).join(
-            Channel, Video.channel_id == Channel.id
-        ).filter(
-            or_(
-                Video.title_search_vector.op('@@')(func.to_tsquery('english', ts_query)),
-                func.similarity(Video.title, original_query) > min_similarity
+        sql = text("""
+            WITH search_results AS (
+                -- Transcript matches
+                SELECT
+                    v.id as video_id,
+                    v.video_id as video_yt_id,
+                    v.title,
+                    v.thumbnail_url,
+                    v.published_at,
+                    c.channel_name,
+                    'transcript' as match_type,
+                    ts_rank(t.text_search_vector, to_tsquery('english', :ts_query)) * 10
+                        + CASE WHEN t.text ILIKE :like_query THEN 100 ELSE 0 END as rank
+                FROM videos v
+                JOIN transcripts t ON v.id = t.video_id
+                JOIN channels c ON v.channel_id = c.id
+                WHERE
+                    c.channel_id = :channel_id
+                    AND (
+                        t.text_search_vector @@ to_tsquery('english', :ts_query)
+                        OR t.text ILIKE :like_query
+                    )
+
+                UNION ALL
+
+                -- Title matches
+                SELECT
+                    v.id,
+                    v.video_id,
+                    v.title,
+                    v.thumbnail_url,
+                    v.published_at,
+                    c.channel_name,
+                    'title',
+                    ts_rank(v.title_search_vector, to_tsquery('english', :ts_query)) * 5 as rank
+                FROM videos v
+                JOIN channels c ON v.channel_id = c.id
+                WHERE
+                    c.channel_id = :channel_id
+                    AND v.title_search_vector @@ to_tsquery('english', :ts_query)
+
+                UNION ALL
+
+                -- Description matches
+                SELECT
+                    v.id,
+                    v.video_id,
+                    v.title,
+                    v.thumbnail_url,
+                    v.published_at,
+                    c.channel_name,
+                    'description',
+                    ts_rank(v.description_search_vector, to_tsquery('english', :ts_query)) * 2 as rank
+                FROM videos v
+                JOIN channels c ON v.channel_id = c.id
+                WHERE
+                    c.channel_id = :channel_id
+                    AND v.description IS NOT NULL
+                    AND v.description_search_vector @@ to_tsquery('english', :ts_query)
             )
-        ).limit(limit * 2).all()
+            SELECT
+                video_yt_id,
+                title,
+                channel_name,
+                thumbnail_url,
+                published_at,
+                COUNT(*) FILTER (WHERE match_type = 'transcript') as transcript_matches,
+                COUNT(*) FILTER (WHERE match_type = 'title') as title_matches,
+                COUNT(*) FILTER (WHERE match_type = 'description') as description_matches,
+                MAX(rank) as max_rank
+            FROM search_results
+            GROUP BY video_id, video_yt_id, title, channel_name, thumbnail_url, published_at
+            ORDER BY max_rank DESC
+            LIMIT :limit
+            OFFSET :offset
+        """)
 
-        results = []
-        for video, channel, ts_rank, similarity in search_results:
-            rank = (ts_rank * 5) + (similarity * 3)  # Title results get 5x weight
+        results = self.db.execute(sql, {
+            'channel_id': channel_id,
+            'ts_query': ts_query,
+            'like_query': f'%{query}%',
+            'limit': limit,
+            'offset': offset
+        }).fetchall()
 
-            results.append({
-                'video_id': video.video_id,
-                'title': video.title,
-                'channel_name': channel.channel_name,
-                'thumbnail_url': video.thumbnail_url,
-                'published_at': video.published_at.isoformat(),
-                'match_type': 'title',
-                'snippet': video.title,
-                'timestamp': None,
-                'rank': rank
-            })
+        return [
+            {
+                'video_id': row[0],
+                'title': row[1],
+                'channel_name': row[2],
+                'thumbnail_url': row[3],
+                'published_at': row[4].isoformat() if row[4] else None,
+                'transcript_matches': row[5] or 0,
+                'title_matches': row[6] or 0,
+                'description_matches': row[7] or 0,
+                'rank': float(row[8]) if row[8] else 0
+            }
+            for row in results
+        ]
 
-        return results
+    def get_batch_snippets(self, video_ids: List[str], query: str) -> Dict[str, Dict]:
+        """
+        Get best snippets for multiple videos efficiently.
+        Returns dict keyed by video_id.
+        """
+        if not video_ids:
+            return {}
 
-    def _search_descriptions(
-        self,
-        ts_query: str,
-        original_query: str,
-        limit: int,
-        min_similarity: float
-    ) -> List[Dict]:
-        """Search in video descriptions"""
+        ts_query = self._prepare_tsquery(query, False)
 
-        search_results = self.db.query(
-            Video,
-            Channel,
-            func.ts_rank(Video.description_search_vector, func.to_tsquery('english', ts_query)).label('ts_rank'),
-            func.similarity(Video.description, original_query).label('similarity')
-        ).join(
-            Channel, Video.channel_id == Channel.id
-        ).filter(
-            and_(
-                Video.description.isnot(None),
-                or_(
-                    Video.description_search_vector.op('@@')(func.to_tsquery('english', ts_query)),
-                    func.similarity(Video.description, original_query) > min_similarity
+        sql = text("""
+            SELECT
+                v.video_id,
+                REPLACE(REPLACE(
+                    ts_headline('english', t.text, to_tsquery('english', :ts_query),
+                        'StartSel=<<, StopSel=>>, MaxWords=50, MinWords=25'),
+                    '<<', '<mark>'),
+                    '>>', '</mark>') as snippet,
+                (
+                    SELECT (s->>'start')::float
+                    FROM jsonb_array_elements(t.snippets) as s
+                    WHERE lower(s->>'text') LIKE :like_query_lower
+                    LIMIT 1
+                ) as timestamp
+            FROM transcripts t
+            JOIN videos v ON t.video_id = v.id
+            WHERE
+                v.video_id = ANY(:video_ids)
+                AND (
+                    t.text_search_vector @@ to_tsquery('english', :ts_query)
+                    OR t.text ILIKE :like_query
                 )
-            )
-        ).limit(limit * 2).all()
+        """)
 
-        results = []
-        for video, channel, ts_rank, similarity in search_results:
-            rank = (ts_rank * 2) + (similarity * 1)  # Description results get 2x weight
+        results = self.db.execute(sql, {
+            'video_ids': video_ids,
+            'ts_query': ts_query,
+            'like_query': f'%{query}%',
+            'like_query_lower': f'%{query.lower()}%'
+        }).fetchall()
 
-            snippet = self._extract_snippet(video.description or '', original_query)
+        # Build dict keyed by video_id
+        snippets = {}
+        for row in results:
+            snippets[row[0]] = {
+                'snippet': row[1],
+                'timestamp': float(row[2]) if row[2] else None
+            }
 
-            results.append({
-                'video_id': video.video_id,
-                'title': video.title,
-                'channel_name': channel.channel_name,
-                'thumbnail_url': video.thumbnail_url,
-                'published_at': video.published_at.isoformat(),
-                'match_type': 'description',
-                'snippet': snippet,
-                'timestamp': None,
-                'rank': rank
-            })
-
-        return results
-
-    def _extract_snippet(self, text: str, query: str, context_chars: int = 150) -> str:
-        """Extract a snippet of text around the search query match"""
-        if not text:
-            return ""
-
-        # Find the query in the text (case-insensitive)
-        lower_text = text.lower()
-        lower_query = query.lower()
-
-        # Try to find exact phrase first
-        pos = lower_text.find(lower_query)
-
-        # If exact phrase not found, find first word of query
-        if pos == -1:
-            words = lower_query.split()
-            for word in words:
-                pos = lower_text.find(word)
-                if pos != -1:
-                    break
-
-        # If still not found, return beginning of text
-        if pos == -1:
-            return text[:context_chars * 2] + "..."
-
-        # Calculate snippet boundaries
-        start = max(0, pos - context_chars)
-        end = min(len(text), pos + len(query) + context_chars)
-
-        # Extract snippet
-        snippet = text[start:end]
-
-        # Add ellipsis if truncated
-        if start > 0:
-            snippet = "..." + snippet
-        if end < len(text):
-            snippet = snippet + "..."
-
-        return snippet.strip()
-
-    def _find_timestamp(self, snippets: List[Dict], query: str) -> Optional[float]:
-        """Find the timestamp where the query appears in the transcript"""
-        if not snippets:
-            return None
-
-        lower_query = query.lower()
-
-        for snippet in snippets:
-            if lower_query in snippet['text'].lower():
-                return snippet['start']
-
-        return None
+        return snippets

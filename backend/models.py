@@ -1,7 +1,7 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import TSVECTOR, JSONB
 from datetime import datetime
 
 Base = declarative_base()
@@ -47,7 +47,7 @@ class Transcript(Base):
     id = Column(Integer, primary_key=True)
     video_id = Column(Integer, ForeignKey('videos.id'), nullable=False, unique=True)
     text = Column(Text, nullable=False)
-    snippets = Column(JSON, nullable=False)
+    snippets = Column(JSONB, nullable=False)
     language_code = Column(String(10))
     is_generated = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

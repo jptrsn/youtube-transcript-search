@@ -16,9 +16,10 @@
 	let searchQuery = '';
 	let searchResults: any[] = [];
 	let searching = false;
+	let loadingSnippets = false;
+	let snippets: Record<string, any> = {};
 
 	let jobId = '';
-
 	let jobProgress: any[] = [];
 	let showProgress = false;
 
@@ -28,24 +29,19 @@
 	// Load channel data
 	async function loadChannel() {
 		console.log('loadChannel called for:', channelId);
-		console.log('API_URL:', API_URL);
 		loading = true;
 		error = '';
 		try {
 			const url = `${API_URL}/api/channels/${channelId}/details`;
-			console.log('Fetching:', url);
 			const res = await fetch(url);
-			console.log('Response status:', res.status);
 
 			if (res.status === 404) {
 				console.log('Channel not found, auto-adding...');
 				await autoAddChannel();
 			} else if (res.ok) {
 				const data = await res.json();
-				console.log('Channel data:', data);
-				channel = data;  // Changed from data.channel
+				channel = data;
 				videos = data.videos;
-				console.log('Set channel and videos, loading should be false next');
 			} else {
 				throw new Error('Failed to load channel');
 			}
@@ -53,45 +49,48 @@
 			console.error('Error in loadChannel:', err);
 			error = err.message;
 		} finally {
-			console.log('Finally block, setting loading to false');
 			loading = false;
-			console.log('loading is now:', loading);
 		}
 	}
 
 	async function autoAddChannel() {
-    try {
-        const params = new URLSearchParams({
-            channel_url: `https://youtube.com/channel/${channelId}`,
-            transcript_limit: '5'
-        });
+		try {
+			const params = new URLSearchParams({
+				channel_url: `https://youtube.com/channel/${channelId}`,
+				transcript_limit: '5'
+			});
 
-        const res = await fetch(`${API_URL}/api/channels/add-limited-async?${params}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
+			const res = await fetch(`${API_URL}/api/channels/add-limited-async?${params}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' }
+			});
 
-        if (!res.ok) throw new Error('Failed to add channel');
+			if (!res.ok) throw new Error('Failed to add channel');
 
-        const data = await res.json();
-        jobId = data.job_id;
-        showProgress = true;
+			const data = await res.json();
+			jobId = data.job_id;
+			showProgress = true;
 
-        connectWebSocket(jobId);
-    } catch (err: any) {
-        error = err.message;
-        loading = false;
-    }
+			connectWebSocket(jobId);
+		} catch (err: any) {
+			error = err.message;
+			loading = false;
+		}
 	}
 
 	async function performSearch(query: string) {
 		if (!query.trim()) {
 			searchResults = [];
+			snippets = {};
 			return;
 		}
 
 		searching = true;
+		loadingSnippets = false;
+		snippets = {};
+
 		try {
+			// Request 1: Fast results without snippets
 			const res = await fetch(
 				`${API_URL}/api/channels/${channelId}/search?q=${encodeURIComponent(query)}&limit=20`
 			);
@@ -99,26 +98,47 @@
 
 			const data = await res.json();
 			searchResults = data.results;
+			searching = false;
+
+			// Request 2: Batch fetch snippets for all results
+			if (searchResults.length > 0) {
+				loadingSnippets = true;
+				const videoIds = searchResults.map((r) => r.video_id);
+
+				const snippetRes = await fetch(`${API_URL}/api/videos/batch-snippets`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						video_ids: videoIds,
+						query: query
+					})
+				});
+
+				if (snippetRes.ok) {
+					snippets = await snippetRes.json();
+				}
+				loadingSnippets = false;
+			}
 		} catch (err: any) {
 			console.error('Search error:', err);
-		} finally {
 			searching = false;
+			loadingSnippets = false;
 		}
 	}
 
 	function handleSearch(event: CustomEvent<{ query: string }>) {
 		const query = event.detail.query;
 
-		// Update URL with search params
 		const url = new URL(window.location.href);
 		if (query) {
 			url.searchParams.set('q', query);
+			// Push to history so back button works through searches
+			goto(url.pathname + url.search, { replaceState: false, noScroll: true });
 		} else {
 			url.searchParams.delete('q');
+			// Replace state when clearing to avoid history clutter
+			goto(url.pathname + url.search, { replaceState: true, noScroll: true });
 		}
-		goto(url.pathname + url.search, { replaceState: true, noScroll: true });
-
-		// Don't call performSearch here - let the reactive statement handle it
 	}
 
 	function connectWebSocket(jid: string) {
@@ -127,22 +147,19 @@
 
 		ws.onmessage = (event) => {
 			const message = JSON.parse(event.data);
-
-			// Add all messages to progress array
 			jobProgress = [...jobProgress, message];
 
-			// Handle specific events
 			if (message.event === 'complete') {
 				setTimeout(() => {
 					showProgress = false;
-					jobProgress = []; // Reset progress
+					jobProgress = [];
 					loadChannel();
 				}, 3000);
 			} else if (message.event === 'error') {
 				error = message.data.message;
 				setTimeout(() => {
 					showProgress = false;
-					jobProgress = []; // Reset progress
+					jobProgress = [];
 				}, 3000);
 			}
 		};
@@ -190,21 +207,21 @@
 	}
 
 	async function checkNewVideos() {
-    try {
-        const res = await fetch(`${API_URL}/api/channels/${channelId}/check-new-async`, {
-            method: 'POST'
-        });
+		try {
+			const res = await fetch(`${API_URL}/api/channels/${channelId}/check-new-async`, {
+				method: 'POST'
+			});
 
-        if (!res.ok) throw new Error('Failed to start job');
+			if (!res.ok) throw new Error('Failed to start job');
 
-        const data = await res.json();
-        jobId = data.job_id;
-        showProgress = true;
+			const data = await res.json();
+			jobId = data.job_id;
+			showProgress = true;
 
-        connectWebSocket(jobId);
-    } catch (err: any) {
-        error = err.message;
-    }
+			connectWebSocket(jobId);
+		} catch (err: any) {
+			error = err.message;
+		}
 	}
 
 	function getStatusBadge(video: any) {
@@ -219,9 +236,7 @@
 
 	let mounted = false;
 
-	// On mount, load channel and perform search if query in URL
 	onMount(() => {
-		console.log('onMount called, channelId:', channelId);
 		mounted = true;
 		loadChannel();
 		if (urlSearchQuery) {
@@ -230,13 +245,13 @@
 		}
 	});
 
-	// Watch for URL param changes (e.g., browser back/forward) - only after mount
 	$: if (mounted && urlSearchQuery !== searchQuery) {
 		searchQuery = urlSearchQuery;
 		if (urlSearchQuery) {
 			performSearch(urlSearchQuery);
 		} else {
 			searchResults = [];
+			snippets = {};
 		}
 	}
 </script>
@@ -263,21 +278,21 @@
 				<span>{channel.coverage_percent}% coverage</span>
 			</div>
 			<div class="actions">
-				<!-- <button on:click={fetchMissingTranscripts} class="btn-secondary">
-					Fetch Missing Transcripts
-				</button> -->
-				<!-- <button on:click={retryFailedTranscripts} class="btn-secondary">
-					Retry Failed Transcripts
-				</button> -->
 				<button on:click={checkNewVideos} class="btn-secondary">
 					Check for New Videos
-			</button>
+				</button>
 			</div>
 		</div>
 
 		<ChannelSearch {searchQuery} on:search={handleSearch} />
 
-		<SearchResults results={searchResults} loading={searching} />
+		<SearchResults
+			results={searchResults}
+			loading={searching}
+			{snippets}
+			{loadingSnippets}
+			{searchQuery}
+		/>
 
 		{#if !searchQuery}
 			<div class="videos-section">

@@ -16,9 +16,16 @@ import queue
 from datetime import datetime, timezone
 from backend.youtube_client import YouTubeClient
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import sys
+
+# Configure logging to stdout
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout,
+    force=True
+)
+logger = logging.getLogger("backend.api")
 
 app = FastAPI(
     title="YouTube Transcript Search API",
@@ -430,28 +437,31 @@ async def retry_failed_async(
 async def get_channel_details(channel_id: str, db: Session = Depends(get_db)):
     """Get detailed channel information including video list"""
     try:
-
         channel = db.query(Channel).filter(Channel.channel_id == channel_id).first()
 
         if not channel:
             raise HTTPException(status_code=404, detail="Channel not found")
 
-        # Get all videos with transcript status
-        videos = db.query(Video).filter(Video.channel_id == channel.id).order_by(Video.published_at.desc()).all()
+        # Single query with joins - fetch everything at once
+        from sqlalchemy.orm import joinedload
+
+        videos = db.query(Video).filter(
+            Video.channel_id == channel.id
+        ).options(
+            joinedload(Video.transcript),
+            joinedload(Video.transcript_errors)
+        ).order_by(Video.published_at.desc()).all()
 
         videos_data = []
         for video in videos:
-            transcript = db.query(Transcript).filter(Transcript.video_id == video.id).first()
-            errors = db.query(TranscriptError).filter(TranscriptError.video_id == video.id).all()
-
             videos_data.append({
                 "video_id": video.video_id,
                 "title": video.title,
                 "description": video.description,
                 "published_at": video.published_at.isoformat(),
                 "thumbnail_url": video.thumbnail_url,
-                "has_transcript": transcript is not None,
-                "errors": [{"type": e.error_type, "message": e.error_message} for e in errors]
+                "has_transcript": video.transcript is not None,
+                "errors": [{"type": e.error_type, "message": e.error_message} for e in video.transcript_errors]
             })
 
         return {
@@ -474,32 +484,28 @@ async def get_channel_details(channel_id: str, db: Session = Depends(get_db)):
 async def search_channel(
     channel_id: str,
     q: str = Query(..., description="Search query"),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=100, description="Results per page"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
     db: Session = Depends(get_db)
 ):
-    """Search within a specific channel's transcripts"""
+    """Search within a specific channel's transcripts with pagination"""
     try:
-
-        # Verify channel exists
-        channel = db.query(Channel).filter(Channel.channel_id == channel_id).first()
-        if not channel:
-            raise HTTPException(status_code=404, detail="Channel not found")
-
         search_service = SearchService(db)
-        all_results = search_service.search(query=q, limit=limit)
-
-        # Filter results to only this channel
-        channel_results = [r for r in all_results if r['channel_name'] == channel.channel_name]
+        results = search_service.search_channel(
+            channel_id=channel_id,
+            query=q,
+            limit=limit,
+            offset=offset
+        )
 
         return {
             "query": q,
             "channel_id": channel_id,
-            "channel_name": channel.channel_name,
-            "count": len(channel_results),
-            "results": channel_results
+            "count": len(results),
+            "offset": offset,
+            "limit": limit,
+            "results": results
         }
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error searching channel: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -683,4 +689,29 @@ async def submit_video_transcript(request: Request, db: Session = Depends(get_db
         raise
     except Exception as e:
         logger.error(f"Error submitting transcript: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/videos/batch-snippets")
+async def batch_get_snippets(request: Request, db: Session = Depends(get_db)):
+    """
+    Get best snippets for multiple videos in one request.
+    Accepts: { video_ids: [...], query: "search term" }
+    Returns: { video_id: { snippet, timestamp }, ... }
+    """
+    try:
+        data = await request.json()
+        video_ids = data.get('video_ids', [])
+        query = data.get('query', '')
+
+        if not video_ids or not query:
+            raise HTTPException(status_code=400, detail="video_ids and query required")
+
+        search_service = SearchService(db)
+        results = search_service.get_batch_snippets(video_ids, query)
+
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting batch snippets: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,330 +1,256 @@
 <script lang="ts">
 	export let results: any[] = [];
-	export let loading = false;
+	export let loading: boolean = false;
+	export let snippets: Record<string, any> = {};
+	export let loadingSnippets: boolean = false;
+	export let searchQuery: string = ''; // NEW: Pass the query to determine if search was performed
 
-	interface Match {
-		match_type: string;
-		snippet: string;
-		timestamp: number | null;
-		rank: number;
-	}
-
-	interface GroupedVideo {
-		video_id: string;
-		title: string;
-		channel_name: string;
-		thumbnail_url: string;
-		published_at: string;
-		matches: Match[];
-	}
-
-	let expandedVideoId: string | null = null;
-
-	// Group results by video
-	$: groupedResults = results.reduce((acc: Record<string, GroupedVideo>, result: any) => {
-		if (!acc[result.video_id]) {
-			acc[result.video_id] = {
-				video_id: result.video_id,
-				title: result.title,
-				channel_name: result.channel_name,
-				thumbnail_url: result.thumbnail_url,
-				published_at: result.published_at,
-				matches: []
-			};
-		}
-		acc[result.video_id].matches.push({
-			match_type: result.match_type,
-			snippet: result.snippet,
-			timestamp: result.timestamp,
-			rank: result.rank
-		});
-		return acc;
-	}, {});
-
-	$: videoResults = Object.values(groupedResults) as GroupedVideo[];
-
-	function toggleExpanded(videoId: string) {
-		if (expandedVideoId === videoId) {
-			expandedVideoId = null;
-		} else {
-			expandedVideoId = videoId;
-		}
-	}
-
-	function formatTimestamp(seconds: number | null): string {
-		if (seconds === null) return '';
+	function formatTimestamp(seconds: number): string {
 		const mins = Math.floor(seconds / 60);
 		const secs = Math.floor(seconds % 60);
 		return `${mins}:${secs.toString().padStart(2, '0')}`;
 	}
-
-	function getYouTubeUrl(videoId: string, timestamp: number | null): string {
-		const baseUrl = `https://youtube.com/watch?v=${videoId}`;
-		if (timestamp !== null) {
-			const adjustedTimestamp = Math.max(0, Math.floor(timestamp) - 1);
-			return `${baseUrl}&t=${adjustedTimestamp}s`;
-		}
-		return baseUrl;
-	}
-
-	function getMatchBadge(matchType: string): string {
-		switch (matchType) {
-			case 'transcript':
-				return '📝 Transcript';
-			case 'title':
-				return '📺 Title';
-			case 'description':
-				return '📄 Description';
-			default:
-				return matchType;
-		}
-	}
 </script>
 
-<div class="results-container">
-	{#if loading}
-		<div class="loading">Searching transcripts...</div>
-	{:else if videoResults.length > 0}
-		{#each videoResults as video, i}
-			<article class="result-card">
-				<div class="result-number">{i + 1}</div>
-				<div class="result-content">
-					<div class="video-header">
-						<a href={getYouTubeUrl(video.video_id, video.matches[0].timestamp)} target="_blank" class="title">
-							{video.title}
+<div class="search-results">
+	{#if !searchQuery}
+		<!-- No search performed, show nothing -->
+	{:else if loading}
+		<div class="loading">Searching...</div>
+	{:else if results.length === 0}
+		<div class="no-results">No results found</div>
+	{:else}
+		<div class="results-header">
+			<h2>Found {results.length} videos with matches</h2>
+			{#if loadingSnippets}
+				<span class="loading-snippets">Loading previews...</span>
+			{/if}
+		</div>
+
+		<div class="results-list">
+			{#each results as result}
+				<div class="result-card">
+					<div class="result-header">
+						<a
+							href="https://youtube.com/watch?v={result.video_id}"
+							target="_blank"
+							class="result-title"
+						>
+							{result.title}
 						</a>
-						<div class="meta">
-							<span class="channel">{video.channel_name}</span>
-							<span class="separator">•</span>
-							<span class="match-count">{video.matches.length} match{video.matches.length !== 1 ? 'es' : ''}</span>
+						<div class="match-badges">
+							{#if result.transcript_matches > 0}
+								<span class="badge badge-transcript">
+									📝 {result.transcript_matches} transcript {result.transcript_matches === 1 ? 'match' : 'matches'}
+								</span>
+							{/if}
+							{#if result.title_matches > 0}
+								<span class="badge badge-title">🎬 title match</span>
+							{/if}
+							{#if result.description_matches > 0}
+								<span class="badge badge-description">📄 description match</span>
+							{/if}
 						</div>
 					</div>
 
-					<!-- First match (always visible) -->
-					<div class="match-item first-match">
-						<div class="match-header">
-							<span class="match-badge">{getMatchBadge(video.matches[0].match_type)}</span>
-							{#if video.matches[0].timestamp !== null}
-								<a
-									href={getYouTubeUrl(video.video_id, video.matches[0].timestamp)}
+					{#if snippets[result.video_id]}
+						<div class="snippet-container">
+							<div class="snippet">
+								{@html snippets[result.video_id].snippet}
+							</div>
+							{#if snippets[result.video_id].timestamp}
+							  <a
+									href="https://youtube.com/watch?v={result.video_id}&t={Math.floor(snippets[result.video_id].timestamp)}s"
 									target="_blank"
 									class="timestamp-link"
 								>
-									{formatTimestamp(video.matches[0].timestamp)}
+									⏱ {formatTimestamp(snippets[result.video_id].timestamp)}
 								</a>
 							{/if}
 						</div>
-						<p class="snippet">{video.matches[0].snippet}</p>
-					</div>
-
-					<!-- Additional matches (in accordion) -->
-					{#if video.matches.length > 1}
-						<button
-							class="expand-button"
-							on:click={() => toggleExpanded(video.video_id)}
-							class:expanded={expandedVideoId === video.video_id}
-						>
-							{expandedVideoId === video.video_id ? '▼' : '▶'}
-							Show {video.matches.length - 1} more match{video.matches.length - 1 !== 1 ? 'es' : ''}
-						</button>
-
-						{#if expandedVideoId === video.video_id}
-							<div class="additional-matches">
-								{#each video.matches.slice(1) as match}
-									<div class="match-item">
-										<div class="match-header">
-											<span class="match-badge">{getMatchBadge(match.match_type)}</span>
-											{#if match.timestamp !== null}
-												<a
-													href={getYouTubeUrl(video.video_id, match.timestamp)}
-													target="_blank"
-													class="timestamp-link"
-												>
-													{formatTimestamp(match.timestamp)}
-												</a>
-											{/if}
-										</div>
-										<p class="snippet">{match.snippet}</p>
-									</div>
-								{/each}
-							</div>
-						{/if}
+					{:else if loadingSnippets}
+						<div class="snippet-placeholder">
+							<div class="shimmer"></div>
+						</div>
 					{/if}
 				</div>
-			</article>
-		{/each}
+			{/each}
+		</div>
 	{/if}
 </div>
 
 <style>
-	.results-container {
+	.search-results {
 		margin-top: 2rem;
 	}
 
-	.loading {
+	.loading,
+	.no-results {
 		text-align: center;
 		padding: 3rem;
 		color: #d4a574;
 		font-size: 1.2rem;
 	}
 
-	.result-card {
+	.results-header {
 		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1.5rem;
+		padding-bottom: 1rem;
+		border-bottom: 3px solid #8b4513;
+	}
+
+	h2 {
+		color: #ff8c42;
+		font-size: 1.5rem;
+		margin: 0;
+	}
+
+	.loading-snippets {
+		color: #d4a574;
+		font-size: 0.9rem;
+		font-style: italic;
+	}
+
+	.results-list {
+		display: flex;
+		flex-direction: column;
 		gap: 1.5rem;
+	}
+
+	.result-card {
 		background: #1a0f08;
 		border: 3px solid #8b4513;
 		padding: 1.5rem;
-		margin-bottom: 1.5rem;
-		box-shadow: 6px 6px 0 #0f0805;
 		transition: all 0.2s;
 	}
 
 	.result-card:hover {
 		border-color: #ff8c42;
 		transform: translate(-2px, -2px);
-		box-shadow: 8px 8px 0 #0f0805;
+		box-shadow: 6px 6px 0 #0f0805;
 	}
 
-	.result-number {
-		font-size: 2rem;
-		font-weight: bold;
-		color: #ff8c42;
-		min-width: 3rem;
-		text-align: center;
-	}
-
-	.result-content {
-		flex: 1;
-	}
-
-	.video-header {
+	.result-header {
 		margin-bottom: 1rem;
-		padding-bottom: 1rem;
-		border-bottom: 2px solid #8b4513;
 	}
 
-	.title {
-		font-size: 1.3rem;
+	.result-title {
 		color: #ffa500;
 		text-decoration: none;
+		font-size: 1.3rem;
+		font-weight: bold;
 		display: block;
-		margin-bottom: 0.5rem;
-		line-height: 1.3;
+		margin-bottom: 0.75rem;
 	}
 
-	.title:hover {
+	.result-title:hover {
 		color: #ffb732;
 		text-decoration: underline;
 	}
 
-	.meta {
-		color: #d4a574;
-		font-size: 0.9rem;
+	.match-badges {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
 	}
 
-	.separator {
-		margin: 0 0.5rem;
-	}
-
-	.channel {
-		color: #ff8c42;
-	}
-
-	.match-count {
-		color: #d4a574;
+	.badge {
+		padding: 0.25rem 0.75rem;
+		border-radius: 3px;
+		font-size: 0.85rem;
 		font-weight: bold;
 	}
 
-	.match-item {
-		background: #0f0805;
+	.badge-transcript {
+		background: #2d5016;
+		color: #90ee90;
+	}
+
+	.badge-title {
+		background: #4a3520;
+		color: #ffd700;
+	}
+
+	.badge-description {
+		background: #3a3a52;
+		color: #b0b0ff;
+	}
+
+	.snippet-container {
+		margin-top: 1rem;
 		padding: 1rem;
+		background: #0f0805;
 		border-left: 3px solid #ff8c42;
-		margin-bottom: 0.5rem;
 	}
 
-	.first-match {
-		margin-bottom: 1rem;
-	}
-
-	.match-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 0.5rem;
-	}
-
-	.match-badge {
-		font-size: 0.85rem;
+	.snippet {
 		color: #d4a574;
+		line-height: 1.6;
+		margin-bottom: 0.5rem;
+	}
+
+	.snippet :global(mark) {
+		background: #ff8c42;
+		color: #1a0f08;
+		padding: 0.1rem 0.3rem;
+		font-weight: bold;
 	}
 
 	.timestamp-link {
 		color: #ff8c42;
 		text-decoration: none;
 		font-size: 0.9rem;
-		font-weight: bold;
-	}
-
-	.timestamp-link:hover {
-		color: #ffa500;
-		text-decoration: underline;
-	}
-
-	.snippet {
-		color: #f4e4d4;
-		line-height: 1.6;
-		margin: 0;
-	}
-
-	.expand-button {
-		width: 100%;
-		padding: 0.75rem;
-		margin: 0.5rem 0;
-		background: #8b4513;
-		color: #f4e4d4;
-		border: 2px solid #8b4513;
-		font-family: 'Courier New', monospace;
-		font-size: 0.9rem;
-		cursor: pointer;
-		transition: all 0.2s;
-		text-align: left;
-	}
-
-	.expand-button:hover {
-		background: #a0522d;
-		border-color: #a0522d;
-	}
-
-	.expand-button.expanded {
-		background: #a0522d;
-	}
-
-	.additional-matches {
+		display: inline-block;
 		margin-top: 0.5rem;
 	}
 
+	.timestamp-link:hover {
+		text-decoration: underline;
+	}
+
+	.snippet-placeholder {
+		margin-top: 1rem;
+		padding: 1rem;
+		background: #0f0805;
+		border-left: 3px solid #8b4513;
+		height: 60px;
+		position: relative;
+		overflow: hidden;
+	}
+
+	.shimmer {
+		width: 100%;
+		height: 100%;
+		background: linear-gradient(
+			90deg,
+			#0f0805 0%,
+			#1a0f08 50%,
+			#0f0805 100%
+		);
+		background-size: 200% 100%;
+		animation: shimmer 1.5s infinite;
+	}
+
+	@keyframes shimmer {
+		0% {
+			background-position: -200% 0;
+		}
+		100% {
+			background-position: 200% 0;
+		}
+	}
+
 	@media (max-width: 768px) {
-		.result-card {
+		.results-header {
 			flex-direction: column;
-			gap: 1rem;
+			align-items: flex-start;
+			gap: 0.5rem;
 		}
 
-		.result-number {
-			font-size: 1.5rem;
-			min-width: auto;
-			text-align: left;
-		}
-
-		.title {
+		.result-title {
 			font-size: 1.1rem;
-		}
-
-		.meta {
-			font-size: 0.85rem;
-		}
-
-		.snippet {
-			font-size: 0.95rem;
 		}
 	}
 </style>
