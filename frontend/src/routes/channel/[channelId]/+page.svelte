@@ -19,6 +19,11 @@
 	let loadingSnippets = false;
 	let snippets: Record<string, any> = {};
 
+	let totalResults = 0;
+	let searchOffset = 0;
+	let hasMoreResults = true;
+	let loadingMore = false;
+
 	let jobId = '';
 	let jobProgress: any[] = [];
 	let showProgress = false;
@@ -82,25 +87,29 @@
 		if (!query.trim()) {
 			searchResults = [];
 			snippets = {};
+			searchOffset = 0;
+			hasMoreResults = true;
 			return;
 		}
 
 		searching = true;
 		loadingSnippets = false;
 		snippets = {};
+		searchOffset = 0; // Reset offset on new search
+		hasMoreResults = true;
 
 		try {
-			// Request 1: Fast results without snippets
 			const res = await fetch(
-				`${API_URL}/api/channels/${channelId}/search?q=${encodeURIComponent(query)}&limit=20`
+				`${API_URL}/api/channels/${channelId}/search?q=${encodeURIComponent(query)}&limit=20&offset=0`
 			);
 			if (!res.ok) throw new Error('Search failed');
 
 			const data = await res.json();
 			searchResults = data.results;
+			hasMoreResults = data.results.length === 20; // If we got full page, there might be more
+			totalResults = data.total;
 			searching = false;
 
-			// Request 2: Batch fetch snippets for all results
 			if (searchResults.length > 0) {
 				loadingSnippets = true;
 				const videoIds = searchResults.map((r) => r.video_id);
@@ -123,6 +132,49 @@
 			console.error('Search error:', err);
 			searching = false;
 			loadingSnippets = false;
+		}
+	}
+
+	async function loadMoreResults() {
+		if (!searchQuery || loadingMore) return;
+
+		loadingMore = true;
+		searchOffset += 20;
+
+		try {
+			const res = await fetch(
+				`${API_URL}/api/channels/${channelId}/search?q=${encodeURIComponent(searchQuery)}&limit=20&offset=${searchOffset}`
+			);
+			if (!res.ok) throw new Error('Load more failed');
+
+			const data = await res.json();
+
+			if (data.results.length === 0) {
+				hasMoreResults = false;
+			} else {
+				searchResults = [...searchResults, ...data.results];
+				hasMoreResults = data.results.length === 20;
+
+				// Fetch snippets for new results
+				const videoIds = data.results.map((r: any) => r.video_id);
+				const snippetRes = await fetch(`${API_URL}/api/videos/batch-snippets`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						video_ids: videoIds,
+						query: searchQuery
+					})
+				});
+
+				if (snippetRes.ok) {
+					const newSnippets = await snippetRes.json();
+					snippets = { ...snippets, ...newSnippets };
+				}
+			}
+		} catch (err: any) {
+			console.error('Load more error:', err);
+		} finally {
+			loadingMore = false;
 		}
 	}
 
@@ -292,6 +344,10 @@
 			{snippets}
 			{loadingSnippets}
 			{searchQuery}
+			hasMore={hasMoreResults}
+			{loadingMore}
+			{totalResults}
+			on:loadmore={loadMoreResults}
 		/>
 
 		{#if !searchQuery}
@@ -301,7 +357,7 @@
 					{#each videos as video}
 						<div class="video-card">
 							<a
-								href="https://youtube.com/watch?v={video.video_id}"
+								href="/watch?v={video.video_id}"
 								target="_blank"
 								class="thumbnail"
 							>
@@ -309,7 +365,7 @@
 							</a>
 							<div class="video-info">
 								<a
-									href="https://youtube.com/watch?v={video.video_id}"
+									href="/watch?v={video.video_id}"
 									target="_blank"
 									class="video-title"
 								>

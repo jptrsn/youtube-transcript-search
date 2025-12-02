@@ -484,14 +484,14 @@ async def get_channel_details(channel_id: str, db: Session = Depends(get_db)):
 async def search_channel(
     channel_id: str,
     q: str = Query(..., description="Search query"),
-    limit: int = Query(20, ge=1, le=100, description="Results per page"),
+    limit: int = Query(20, ge=1, le=200, description="Results per page"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     db: Session = Depends(get_db)
 ):
     """Search within a specific channel's transcripts with pagination"""
     try:
         search_service = SearchService(db)
-        results = search_service.search_channel(
+        results, total_count = search_service.search_channel(
             channel_id=channel_id,
             query=q,
             limit=limit,
@@ -502,8 +502,10 @@ async def search_channel(
             "query": q,
             "channel_id": channel_id,
             "count": len(results),
+            "total": total_count,
             "offset": offset,
             "limit": limit,
+            "has_more": offset + len(results) < total_count,
             "results": results
         }
     except Exception as e:
@@ -714,4 +716,53 @@ async def batch_get_snippets(request: Request, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.error(f"Error getting batch snippets: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/videos/{video_id}/details")
+async def get_video_details(
+    video_id: str,
+    q: str = Query(None, description="Optional search query to highlight matches"),
+    db: Session = Depends(get_db)
+):
+    """Get video details with optional search matches or full transcript"""
+    try:
+        video = db.query(Video).filter(Video.video_id == video_id).first()
+
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        channel = db.query(Channel).filter(Channel.id == video.channel_id).first()
+        transcript = db.query(Transcript).filter(Transcript.video_id == video.id).first()
+
+        response = {
+            "video_id": video.video_id,
+            "title": video.title,
+            "description": video.description,
+            "published_at": video.published_at.isoformat(),
+            "thumbnail_url": video.thumbnail_url,
+            "channel": {
+                "channel_id": channel.channel_id,
+                "channel_name": channel.channel_name,
+                "channel_url": channel.channel_url
+            },
+            "has_transcript": transcript is not None
+        }
+
+        if transcript:
+            # If there's a search query, find all matches
+            if q:
+                search_service = SearchService(db)
+                matches = search_service.get_all_video_matches(video.video_id, q)
+                response["matches"] = matches
+                response["match_count"] = len(matches)
+            else:
+                # No search query - return full transcript with timestamps
+                response["transcript"] = transcript.snippets
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting video details: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

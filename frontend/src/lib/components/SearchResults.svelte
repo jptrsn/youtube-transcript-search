@@ -1,14 +1,25 @@
 <script lang="ts">
+	import { createEventDispatcher } from 'svelte';
+
 	export let results: any[] = [];
+	export let totalResults: number = 0;
 	export let loading: boolean = false;
 	export let snippets: Record<string, any> = {};
 	export let loadingSnippets: boolean = false;
-	export let searchQuery: string = ''; // NEW: Pass the query to determine if search was performed
+	export let searchQuery: string = '';
+	export let hasMore: boolean = true; // NEW
+	export let loadingMore: boolean = false; // NEW
+
+	const dispatch = createEventDispatcher();
 
 	function formatTimestamp(seconds: number): string {
 		const mins = Math.floor(seconds / 60);
 		const secs = Math.floor(seconds % 60);
 		return `${mins}:${secs.toString().padStart(2, '0')}`;
+	}
+
+	function handleLoadMore() {
+		dispatch('loadmore');
 	}
 </script>
 
@@ -21,7 +32,7 @@
 		<div class="no-results">No results found</div>
 	{:else}
 		<div class="results-header">
-			<h2>Found {results.length} videos with matches</h2>
+			<h2>Found {totalResults} videos with matches (showing {results.length})</h2>
 			{#if loadingSnippets}
 				<span class="loading-snippets">Loading previews...</span>
 			{/if}
@@ -32,8 +43,7 @@
 				<div class="result-card">
 					<div class="result-header">
 						<a
-							href="https://youtube.com/watch?v={result.video_id}"
-							target="_blank"
+							href="/watch?v={result.video_id}{searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}"
 							class="result-title"
 						>
 							{result.title}
@@ -75,9 +85,21 @@
 					{/if}
 				</div>
 			{/each}
-		</div>
-	{/if}
-</div>
+			</div>
+
+			{#if hasMore}
+				<div class="load-more-container">
+					<button
+						on:click={handleLoadMore}
+						class="load-more-button"
+						disabled={loadingMore}
+					>
+						{loadingMore ? 'Loading...' : 'Load More Results'}
+					</button>
+				</div>
+			{/if}
+		{/if}
+	</div>
 
 <style>
 	.search-results {
@@ -231,6 +253,40 @@
 		);
 		background-size: 200% 100%;
 		animation: shimmer 1.5s infinite;
+	}
+
+	.load-more-container {
+		display: flex;
+		justify-content: center;
+		margin-top: 2rem;
+		padding-top: 2rem;
+		border-top: 3px solid #8b4513;
+	}
+
+	.load-more-button {
+		padding: 1rem 3rem;
+		background: #8b4513;
+		color: #f4e4d4;
+		border: 3px solid #8b4513;
+		font-family: 'Courier New', monospace;
+		font-size: 1rem;
+		font-weight: bold;
+		cursor: pointer;
+		transition: all 0.2s;
+		box-shadow: 4px 4px 0 #0f0805;
+		margin-bottom: 3rem;
+	}
+
+	.load-more-button:hover:not(:disabled) {
+		background: #a0522d;
+		border-color: #a0522d;
+		transform: translate(-2px, -2px);
+		box-shadow: 6px 6px 0 #0f0805;
+	}
+
+	.load-more-button:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	@keyframes shimmer {
