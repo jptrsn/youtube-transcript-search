@@ -69,7 +69,7 @@ def main():
     parser.add_argument('--ssh-host', required=True, help='SSH host (VPS IP or hostname)')
     parser.add_argument('--ssh-user', default='root', help='SSH username (default: root)')
     parser.add_argument('--ssh-key', default=None, help='SSH private key path (default: auto-detect)')
-    parser.add_argument('--operation', required=True, choices=['fetch-missing', 'retry-failed'],
+    parser.add_argument('--operation', required=True, choices=['fetch-missing', 'retry-failed', 'check-new'],
                         help='Operation to perform')
     parser.add_argument('--channel', required=True, help='Channel ID (e.g., UCxxx)')
     parser.add_argument('--limit', type=int, help='Limit number of videos to process')
@@ -117,6 +117,9 @@ def main():
             elif args.operation == 'retry-failed':
                 print(f"🔄 Retrying failed transcripts for channel {args.channel}...\n")
                 service.retry_failed_transcripts(args.channel, limit=args.limit)
+            elif args.operation == 'check-new':
+                print(f"🆕 Checking for new videos in channel {args.channel}...\n")
+                service.check_for_new_videos(args.channel)
 
             db.close()
 
