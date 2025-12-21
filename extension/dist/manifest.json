@@ -9,6 +9,7 @@
     "scripting"
   ],
   "host_permissions": [
+    "https://youtu.be/*",
     "https://www.youtube.com/*",
     "https://ytscri.be/*"
   ],

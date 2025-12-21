@@ -38,32 +38,51 @@ function getChannelId(): string | null {
   return null;
 }
 
-// Extract video metadata
-function getVideoInfo(videoId: string, channelId: string): VideoInfo | null {
-  try {
-    const scripts = document.querySelectorAll('script');
-    for (const script of scripts) {
-      const content = script.textContent || '';
-      if (content.includes('ytInitialPlayerResponse')) {
-        const match = content.match(/ytInitialPlayerResponse\s*=\s*({.+?});/);
-        if (match) {
-          const playerResponse = JSON.parse(match[1]);
-          const details = playerResponse.videoDetails;
+// Extract video metadata from ytInitialData (updates on navigation)
+async function getVideoInfo(videoId: string, channelId: string): Promise<VideoInfo | null> {
+  // Try up to 10 times with 300ms delay
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const scripts = document.querySelectorAll('script');
+      for (const script of scripts) {
+        const content = script.textContent || '';
+        if (content.includes('ytInitialData')) {
+          // Extract from ytInitialData instead
+          const match = content.match(/ytInitialData\s*=\s*({.+?});/s);
+          if (match) {
+            const data = JSON.parse(match[1]);
 
-          return {
-            videoId,
-            channelId,
-            title: details.title,
-            description: details.shortDescription || '',
-            publishedAt: new Date().toISOString(),
-            thumbnailUrl: details.thumbnail?.thumbnails?.[0]?.url || ''
-          };
+            // Navigate to the video details in ytInitialData
+            const videoData = data?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.[0]?.videoPrimaryInfoRenderer;
+
+            if (videoData) {
+              const title = videoData.title?.runs?.[0]?.text || '';
+              const description = data?.engagementPanels?.find((p: any) =>
+                p.engagementPanelSectionListRenderer?.content?.structuredDescriptionContentRenderer
+              )?.engagementPanelSectionListRenderer?.content?.structuredDescriptionContentRenderer?.items?.[1]?.expandableVideoDescriptionBodyRenderer?.attributedDescriptionBodyText?.content || '';
+
+              const thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
+
+              return {
+                videoId,
+                channelId,
+                title,
+                description,
+                publishedAt: new Date().toISOString(),
+                thumbnailUrl
+              };
+            }
+          }
         }
       }
+    } catch (e) {
+      console.log(`Attempt ${attempt + 1} failed:`, e);
     }
-  } catch (e) {
-    console.error('Error extracting video info:', e);
+
+    await new Promise(resolve => setTimeout(resolve, 300));
   }
+
+  console.error('Failed to get video info after 10 attempts');
   return null;
 }
 
@@ -75,7 +94,6 @@ function extractInnertubeApiKey(): string | null {
       const content = script.textContent || '';
       const match = content.match(/"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"/);
       if (match) {
-        console.log('Found InnerTube API key');
         return match[1];
       }
     }
@@ -101,8 +119,6 @@ async function fetchCaptionsJson(videoId: string, apiKey: string): Promise<any> 
       videoId: videoId,
     };
 
-    console.log('Fetching captions from InnerTube API...');
-
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -110,8 +126,6 @@ async function fetchCaptionsJson(videoId: string, apiKey: string): Promise<any> 
       },
       body: JSON.stringify(requestBody),
     });
-
-    console.log('InnerTube API response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -129,7 +143,6 @@ async function fetchCaptionsJson(videoId: string, apiKey: string): Promise<any> 
       return null;
     }
 
-    console.log('Found caption tracks:', captions.captionTracks.length);
     return captions;
   } catch (e) {
     console.error('Error fetching captions JSON:', e);
@@ -151,7 +164,6 @@ function findEnglishTranscriptUrl(captionsJson: any): string | null {
         (track: any) => track.languageCode === code && track.kind !== 'asr'
       );
       if (manual) {
-        console.log('Found manual English transcript');
         return manual.baseUrl;
       }
     }
@@ -162,12 +174,10 @@ function findEnglishTranscriptUrl(captionsJson: any): string | null {
         (track: any) => track.languageCode === code && track.kind === 'asr'
       );
       if (auto) {
-        console.log('Found auto-generated English transcript');
         return auto.baseUrl;
       }
     }
 
-    console.log('No English transcript found');
     return null;
   } catch (e) {
     console.error('Error finding English transcript URL:', e);
@@ -212,7 +222,6 @@ async function fetchAndParseTranscript(url: string): Promise<TranscriptSegment[]
       }
     });
 
-    console.log(`Parsed ${segments.length} transcript segments`);
     return segments.length > 0 ? segments : null;
   } catch (e) {
     console.error('Error fetching/parsing transcript:', e);
@@ -223,8 +232,6 @@ async function fetchAndParseTranscript(url: string): Promise<TranscriptSegment[]
 // Main function to fetch transcript silently via API
 async function fetchTranscriptSilently(videoId: string): Promise<TranscriptSegment[] | null> {
   try {
-    console.log('Attempting to fetch transcript silently via API...');
-
     // Step 1: Extract API key from page
     const apiKey = extractInnertubeApiKey();
     if (!apiKey) {
@@ -253,7 +260,6 @@ async function fetchTranscriptSilently(videoId: string): Promise<TranscriptSegme
       return null;
     }
 
-    console.log('Successfully fetched transcript silently!');
     return transcript;
   } catch (e) {
     console.error('Silent transcript fetch failed:', e);
@@ -263,7 +269,6 @@ async function fetchTranscriptSilently(videoId: string): Promise<TranscriptSegme
 
 // Fetch transcript by opening UI panel and scraping DOM (fallback method)
 async function fetchTranscriptFromUI(): Promise<TranscriptSegment[] | null> {
-  console.log('Attempting to fetch transcript via UI method...');
 
   // Open transcript panel
   const panelOpened = await openTranscriptPanel();
@@ -279,7 +284,6 @@ async function fetchTranscriptFromUI(): Promise<TranscriptSegment[] | null> {
     return null;
   }
 
-  console.log('Successfully fetched transcript via UI method');
   return transcript;
 }
 
@@ -292,7 +296,6 @@ async function openTranscriptPanel(): Promise<boolean> {
     for (const button of buttons) {
       const text = button.textContent?.toLowerCase() || '';
       if (text.includes('show transcript') || text.includes('transcript')) {
-        console.log('Found transcript button, clicking...');
         button.click();
 
         // Wait for panel to appear
@@ -318,10 +321,7 @@ async function extractTranscriptFromPanel(): Promise<TranscriptSegment[] | null>
     // YouTube transcript items have specific selectors
     const transcriptItems = document.querySelectorAll('ytd-transcript-segment-renderer');
 
-    console.log('Found transcript items:', transcriptItems.length);
-
     if (transcriptItems.length === 0) {
-      console.log('No transcript items found in panel');
       return null;
     }
 
@@ -406,8 +406,6 @@ async function processVideo() {
   const videoId = getVideoId();
   if (!videoId) return;
 
-  console.log('Processing video:', videoId);
-
   // Check if video already exists and has transcript
   const status = await checkVideoStatus(videoId);
   if (status.exists && status.hasTranscript) {
@@ -427,7 +425,7 @@ async function processVideo() {
     return;
   }
 
-  const videoInfo = getVideoInfo(videoId, channelId);
+  const videoInfo = await getVideoInfo(videoId, channelId);
   if (!videoInfo) {
     console.log('Could not extract video info');
     return;
