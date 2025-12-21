@@ -24,6 +24,7 @@ class ChannelService:
     def add_or_update_channel(self, channel_url: str) -> Dict[str, Any]:
         """
         Add a new channel or update an existing one.
+        Fetches all video metadata but NO transcripts.
         Returns summary statistics.
         """
         try:
@@ -82,12 +83,72 @@ class ChannelService:
             # Subscribe to WebSub notifications
             self._subscribe_to_websub(channel_id)
 
-            # Process videos
-            return self._process_videos(db_channel, videos)
+            # Process videos - metadata only, no transcripts
+            return self._process_videos_metadata_only(db_channel, videos)
 
         except Exception as e:
             self._emit('error', {'message': str(e)})
             raise
+
+    def _process_videos_metadata_only(self, channel: Channel, videos: list) -> Dict[str, Any]:
+        """Process videos - add metadata only, NO transcript fetching"""
+        new_videos = 0
+        updated_videos = 0
+
+        for idx, video_data in enumerate(videos, 1):
+            video_id = video_data['video_id']
+
+            self._emit('video_progress', {
+                'current': idx,
+                'total': len(videos),
+                'video_id': video_id,
+                'title': video_data['title']
+            })
+
+            # Check if video exists
+            existing_video = self.db.query(Video).filter(
+                Video.video_id == video_id
+            ).first()
+
+            if existing_video:
+                # Update existing video metadata
+                existing_video.title = video_data['title']
+                existing_video.description = video_data['description']
+                existing_video.thumbnail_url = video_data['thumbnail_url']
+                updated_videos += 1
+                self._emit('video_status', {'status': 'updated'})
+            else:
+                # Create new video
+                db_video = Video(
+                    channel_id=channel.id,
+                    video_id=video_id,
+                    title=video_data['title'],
+                    description=video_data['description'],
+                    published_at=datetime.fromisoformat(video_data['published_at'].replace('Z', '+00:00')),
+                    thumbnail_url=video_data['thumbnail_url']
+                )
+                self.db.add(db_video)
+                new_videos += 1
+                self._emit('video_status', {'status': 'added'})
+
+        self.db.commit()
+
+        # Update channel last_checked
+        channel.last_checked = datetime.utcnow()
+        self.db.commit()
+
+        summary = {
+            'channel_name': channel.channel_name,
+            'total_videos': len(videos),
+            'new_videos': new_videos,
+            'updated_videos': updated_videos,
+            'new_transcripts': 0,
+            'message': 'Video metadata added. Use extension or "Fetch Missing Transcripts" to get transcripts.'
+        }
+
+        self._emit('complete', summary)
+
+        return summary
 
     def _process_videos(self, channel: Channel, videos: list) -> Dict[str, Any]:
         """Process videos and fetch transcripts"""

@@ -67,6 +67,222 @@ function getVideoInfo(videoId: string, channelId: string): VideoInfo | null {
   return null;
 }
 
+// Extract InnerTube API key from page scripts
+function extractInnertubeApiKey(): string | null {
+  try {
+    const scripts = document.querySelectorAll('script');
+    for (const script of scripts) {
+      const content = script.textContent || '';
+      const match = content.match(/"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"/);
+      if (match) {
+        console.log('Found InnerTube API key');
+        return match[1];
+      }
+    }
+    console.log('No InnerTube API key found in page scripts');
+    return null;
+  } catch (e) {
+    console.error('Error extracting API key:', e);
+    return null;
+  }
+}
+
+// Fetch captions JSON from YouTube's InnerTube API
+async function fetchCaptionsJson(videoId: string, apiKey: string): Promise<any> {
+  try {
+    const url = `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`;
+    const requestBody = {
+      context: {
+        client: {
+          clientName: 'WEB',
+          clientVersion: '2.20241212.01.00'
+        }
+      },
+      videoId: videoId,
+    };
+
+    console.log('Fetching captions from InnerTube API...');
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    console.log('InnerTube API response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('InnerTube API request failed:', response.status);
+      console.error('Error response:', errorText);
+      return null;
+    }
+
+    const data = await response.json();
+
+    // Check if captions are available
+    const captions = data?.captions?.playerCaptionsTracklistRenderer;
+    if (!captions || !captions.captionTracks) {
+      console.log('No captions available for video');
+      return null;
+    }
+
+    console.log('Found caption tracks:', captions.captionTracks.length);
+    return captions;
+  } catch (e) {
+    console.error('Error fetching captions JSON:', e);
+    return null;
+  }
+}
+
+// Find English transcript URL from captions JSON
+function findEnglishTranscriptUrl(captionsJson: any): string | null {
+  try {
+    const captionTracks = captionsJson.captionTracks;
+
+    // Look for English transcripts (manual first, then auto-generated)
+    const englishCodes = ['en', 'en-US', 'en-GB'];
+
+    // Try to find manually created English transcript first
+    for (const code of englishCodes) {
+      const manual = captionTracks.find(
+        (track: any) => track.languageCode === code && track.kind !== 'asr'
+      );
+      if (manual) {
+        console.log('Found manual English transcript');
+        return manual.baseUrl;
+      }
+    }
+
+    // Fall back to auto-generated English transcript
+    for (const code of englishCodes) {
+      const auto = captionTracks.find(
+        (track: any) => track.languageCode === code && track.kind === 'asr'
+      );
+      if (auto) {
+        console.log('Found auto-generated English transcript');
+        return auto.baseUrl;
+      }
+    }
+
+    console.log('No English transcript found');
+    return null;
+  } catch (e) {
+    console.error('Error finding English transcript URL:', e);
+    return null;
+  }
+}
+
+// Fetch and parse transcript XML
+async function fetchAndParseTranscript(url: string): Promise<TranscriptSegment[] | null> {
+  try {
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      console.error('Failed to fetch transcript XML:', response.status);
+      return null;
+    }
+
+    const xmlText = await response.text();
+
+    // Parse XML using DOMParser
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+    // Check for parsing errors
+    const parseError = xmlDoc.querySelector('parsererror');
+    if (parseError) {
+      console.error('XML parsing error:', parseError.textContent);
+      return null;
+    }
+
+    // Extract transcript segments
+    const textElements = xmlDoc.querySelectorAll('text');
+    const segments: TranscriptSegment[] = [];
+
+    textElements.forEach(element => {
+      const text = element.textContent || '';
+      const start = parseFloat(element.getAttribute('start') || '0');
+      const duration = parseFloat(element.getAttribute('dur') || '0');
+
+      if (text) {
+        segments.push({ text, start, duration });
+      }
+    });
+
+    console.log(`Parsed ${segments.length} transcript segments`);
+    return segments.length > 0 ? segments : null;
+  } catch (e) {
+    console.error('Error fetching/parsing transcript:', e);
+    return null;
+  }
+}
+
+// Main function to fetch transcript silently via API
+async function fetchTranscriptSilently(videoId: string): Promise<TranscriptSegment[] | null> {
+  try {
+    console.log('Attempting to fetch transcript silently via API...');
+
+    // Step 1: Extract API key from page
+    const apiKey = extractInnertubeApiKey();
+    if (!apiKey) {
+      console.log('Could not extract API key, falling back to UI method');
+      return null;
+    }
+
+    // Step 2: Fetch captions JSON from InnerTube API
+    const captionsJson = await fetchCaptionsJson(videoId, apiKey);
+    if (!captionsJson) {
+      console.log('Could not fetch captions JSON, falling back to UI method');
+      return null;
+    }
+
+    // Step 3: Find English transcript URL
+    const transcriptUrl = findEnglishTranscriptUrl(captionsJson);
+    if (!transcriptUrl) {
+      console.log('No English transcript available, falling back to UI method');
+      return null;
+    }
+
+    // Step 4: Fetch and parse transcript XML
+    const transcript = await fetchAndParseTranscript(transcriptUrl);
+    if (!transcript) {
+      console.log('Could not parse transcript, falling back to UI method');
+      return null;
+    }
+
+    console.log('Successfully fetched transcript silently!');
+    return transcript;
+  } catch (e) {
+    console.error('Silent transcript fetch failed:', e);
+    return null;
+  }
+}
+
+// Fetch transcript by opening UI panel and scraping DOM (fallback method)
+async function fetchTranscriptFromUI(): Promise<TranscriptSegment[] | null> {
+  console.log('Attempting to fetch transcript via UI method...');
+
+  // Open transcript panel
+  const panelOpened = await openTranscriptPanel();
+  if (!panelOpened) {
+    console.log('Could not open transcript panel - video may not have transcript');
+    return null;
+  }
+
+  // Extract transcript from panel
+  const transcript = await extractTranscriptFromPanel();
+  if (!transcript || transcript.length === 0) {
+    console.log('Could not extract transcript from panel');
+    return null;
+  }
+
+  console.log('Successfully fetched transcript via UI method');
+  return transcript;
+}
+
 // Click the "Show transcript" button and wait for panel to load
 async function openTranscriptPanel(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -217,17 +433,17 @@ async function processVideo() {
     return;
   }
 
-  // Open transcript panel
-  const panelOpened = await openTranscriptPanel();
-  if (!panelOpened) {
-    console.log('Could not open transcript panel - video may not have transcript');
-    return;
+  // Try silent method first
+  let transcript = await fetchTranscriptSilently(videoId);
+
+  // Fallback to UI method if silent fails
+  if (!transcript) {
+    console.log('Silent method failed, trying UI method...');
+    transcript = await fetchTranscriptFromUI();
   }
 
-  // Extract transcript from panel
-  const transcript = await extractTranscriptFromPanel();
   if (!transcript || transcript.length === 0) {
-    console.log('Could not extract transcript from panel');
+    console.log('Could not fetch transcript via any method');
     return;
   }
 
@@ -247,11 +463,16 @@ async function processVideo() {
 let lastVideoId: string | null = null;
 let isProcessing = false;
 let hasInitialRun = false;
+let wasOnVideoPage = false;
 
 async function checkForNewVideo() {
   const currentVideoId = getVideoId();
+  const isOnVideoPage = currentVideoId !== null;
 
-  if (currentVideoId && currentVideoId !== lastVideoId && !isProcessing) {
+  // Process if:
+  // 1. We're on a video page AND (we weren't before OR it's a different video)
+  // 2. Not currently processing
+  if (isOnVideoPage && (!wasOnVideoPage || currentVideoId !== lastVideoId) && !isProcessing) {
     console.log('New video detected:', currentVideoId);
     lastVideoId = currentVideoId;
     isProcessing = true;
@@ -260,6 +481,8 @@ async function checkForNewVideo() {
 
     isProcessing = false;
   }
+
+  wasOnVideoPage = isOnVideoPage;
 }
 
 // Listen to YouTube's SPA navigation events (only for subsequent navigations)
@@ -276,6 +499,7 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
       lastVideoId = getVideoId();
+      wasOnVideoPage = lastVideoId !== null;
       processVideo();
       hasInitialRun = true;
     }, 3000);
@@ -283,6 +507,7 @@ if (document.readyState === 'loading') {
 } else {
   setTimeout(() => {
     lastVideoId = getVideoId();
+    wasOnVideoPage = lastVideoId !== null;
     processVideo();
     hasInitialRun = true;
   }, 3000);

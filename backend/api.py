@@ -638,7 +638,11 @@ async def check_video_exists(video_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/videos/submit")
-async def submit_video_transcript(request: Request, db: Session = Depends(get_db)):
+async def submit_video_transcript(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: Session = Depends(get_db)
+):
     """Submit a video and its transcript from the browser extension"""
     try:
         data = await request.json()
@@ -648,10 +652,12 @@ async def submit_video_transcript(request: Request, db: Session = Depends(get_db
         if not video_data or not transcript_data:
             raise HTTPException(status_code=400, detail="Missing video or transcript data")
 
-        # Check if channel exists, if not create it
+        # Check if channel exists
         channel = db.query(Channel).filter(
             Channel.channel_id == video_data['channelId']
         ).first()
+
+        is_new_channel = channel is None
 
         if not channel:
             # Create minimal channel entry
@@ -716,6 +722,20 @@ async def submit_video_transcript(request: Request, db: Session = Depends(get_db
         db.commit()
 
         logger.info(f"Submitted transcript for video {video_data['videoId']} from extension")
+
+        # If this was a new channel, trigger async full channel indexing
+        if is_new_channel:
+            logger.info(f"New channel detected, triggering async channel indexing for {channel.channel_id}")
+            channel_url = f"https://www.youtube.com/channel/{channel.channel_id}"
+
+            # Trigger background task to add all videos from channel
+            background_tasks.add_task(
+                run_channel_job,
+                job_id=str(uuid.uuid4()),
+                operation='add_channel',
+                db=SessionLocal(),
+                channel_url=channel_url
+            )
 
         return {"success": True, "message": "Transcript submitted successfully"}
 
