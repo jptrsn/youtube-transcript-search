@@ -4,6 +4,7 @@ from backend.models import Channel, Video, Transcript, TranscriptError
 from backend.youtube_client import YouTubeClient
 from backend.transcript_fetcher import TranscriptFetcher, IpBlockedException
 from typing import Callable, Optional, Dict, Any
+from backend.services.websub_service import WebSubService
 
 class ChannelService:
     def __init__(self, db: Session, progress_callback: Optional[Callable] = None):
@@ -77,6 +78,9 @@ class ChannelService:
             videos = self.yt_client.get_all_videos(channel_info['uploads_playlist_id'])
 
             self._emit('videos_found', {'count': len(videos)})
+
+            # Subscribe to WebSub notifications
+            self._subscribe_to_websub(channel_id)
 
             # Process videos
             return self._process_videos(db_channel, videos)
@@ -254,6 +258,9 @@ class ChannelService:
         # Update channel last_checked
         channel.last_checked = datetime.utcnow()
         self.db.commit()
+
+        # Subscribe to WebSub notifications
+        self._subscribe_to_websub(channel_id)
 
         summary = {
             'channel_name': channel.channel_name,
@@ -512,6 +519,9 @@ class ChannelService:
             db_channel.last_checked = datetime.utcnow()
             self.db.commit()
 
+            # Subscribe to WebSub notifications
+            self._subscribe_to_websub(channel_id)
+
             summary = {
                 'channel_id': channel_id,
                 'channel_name': channel_info['channel_name'],
@@ -624,3 +634,13 @@ class ChannelService:
         self._emit('complete', summary)
 
         return summary
+
+    def _subscribe_to_websub(self, channel_id: str):
+        """Subscribe to WebSub notifications for a channel"""
+        try:
+            websub_service = WebSubService(self.db)
+            result = websub_service.subscribe_to_channel(channel_id)
+            self._emit('status', {'message': f'WebSub subscription: {result["message"]}'})
+        except Exception as e:
+            # Don't fail the whole operation if WebSub subscription fails
+            self._emit('status', {'message': f'WebSub subscription failed (non-critical): {str(e)}'})

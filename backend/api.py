@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from backend.database import SessionLocal
 from backend.search import SearchService
@@ -15,6 +16,10 @@ import uuid
 import queue
 from datetime import datetime, timezone
 from backend.youtube_client import YouTubeClient
+from backend.services.websub_service import WebSubService
+from fastapi import Request
+from contextlib import asynccontextmanager
+from backend.scheduler import start_scheduler, shutdown_scheduler
 
 import sys
 
@@ -27,10 +32,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("backend.api")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting up application...")
+    start_scheduler()
+    yield
+    # Shutdown
+    logger.info("Shutting down application...")
+    shutdown_scheduler()
+
 app = FastAPI(
     title="YouTube Transcript Search API",
     description="Search through YouTube video transcripts",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS configuration - allow all origins since it's your personal server
@@ -781,4 +797,183 @@ async def get_video_details(
         raise
     except Exception as e:
         logger.error(f"Error getting video details: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Add these imports at the top of the file
+from backend.services.websub_service import WebSubService
+from fastapi import Request
+
+# Add these endpoints (I'll put them after your existing channel endpoints)
+
+@app.post("/api/webhooks/youtube")
+async def receive_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Receive WebSub notifications from YouTube.
+    This is called by YouTube's PubSubHubbub hub when a video is uploaded/updated.
+    """
+    try:
+        # Get raw body for signature verification
+        body = await request.body()
+
+        # Get signature from headers
+        signature = request.headers.get('X-Hub-Signature')
+
+        # Process the notification
+        websub_service = WebSubService(db)
+        result = websub_service.process_notification(body, signature)
+
+        if result['success']:
+            logger.info(f"WebSub notification processed: {result['message']}")
+            return {"success": True, "message": result['message']}
+        else:
+            logger.warning(f"WebSub notification failed: {result['message']}")
+            return {"success": False, "message": result['message']}, 400
+
+    except Exception as e:
+        logger.error(f"Error processing webhook: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/webhooks/youtube")
+async def verify_webhook(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Verify WebSub subscription requests from YouTube hub.
+    The hub sends a GET request with challenge to verify our endpoint.
+    """
+    try:
+        # Get query parameters
+        mode = request.query_params.get('hub.mode')
+        topic = request.query_params.get('hub.topic')
+        challenge = request.query_params.get('hub.challenge')
+        verify_token = request.query_params.get('hub.verify_token')
+        lease_seconds = request.query_params.get('hub.lease_seconds')
+
+        if not all([mode, topic, challenge, verify_token]):
+            raise HTTPException(status_code=400, detail="Missing required parameters")
+
+        # Convert lease_seconds to int if present
+        lease_seconds_int = int(lease_seconds) if lease_seconds else None
+
+        # Verify the subscription
+        websub_service = WebSubService(db)
+        success, response_challenge = websub_service.verify_subscription(
+            mode=mode,
+            topic=topic,
+            challenge=challenge,
+            verify_token=verify_token,
+            lease_seconds=lease_seconds_int
+        )
+
+        if success and response_challenge:
+            logger.info(f"WebSub verification successful for topic: {topic}")
+            # Must return the challenge as plain text
+            from fastapi.responses import PlainTextResponse
+            return PlainTextResponse(content=response_challenge)
+        else:
+            logger.warning(f"WebSub verification failed for topic: {topic}")
+            raise HTTPException(status_code=404, detail="Verification failed")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error during webhook verification: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/channels/{channel_id}/websub/subscribe")
+async def subscribe_channel_websub(channel_id: str, db: Session = Depends(get_db)):
+    """
+    Manually subscribe to WebSub notifications for a channel.
+    Useful for subscribing to existing channels or resubscribing after failures.
+    """
+    try:
+        websub_service = WebSubService(db)
+        result = websub_service.subscribe_to_channel(channel_id)
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error subscribing to channel {channel_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/channels/{channel_id}/websub/unsubscribe")
+async def unsubscribe_channel_websub(channel_id: str, db: Session = Depends(get_db)):
+    """
+    Unsubscribe from WebSub notifications for a channel.
+    """
+    try:
+        websub_service = WebSubService(db)
+        result = websub_service.unsubscribe_from_channel(channel_id)
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error unsubscribing from channel {channel_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/channels/{channel_id}/websub/status")
+async def get_channel_websub_status(channel_id: str, db: Session = Depends(get_db)):
+    """
+    Get WebSub subscription status for a specific channel.
+    """
+    try:
+        websub_service = WebSubService(db)
+        status = websub_service.get_subscription_status(channel_id)
+
+        if status:
+            return status
+        else:
+            return {"subscribed": False, "message": "No active subscription"}
+
+    except Exception as e:
+        logger.error(f"Error getting subscription status for {channel_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/websub/subscriptions")
+async def list_websub_subscriptions(db: Session = Depends(get_db)):
+    """
+    List all WebSub subscriptions with their status.
+    Useful for monitoring and debugging.
+    """
+    try:
+        websub_service = WebSubService(db)
+        subscriptions = websub_service.list_all_subscriptions()
+
+        return {
+            "total": len(subscriptions),
+            "subscriptions": subscriptions
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing subscriptions: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/websub/renew")
+async def renew_expiring_subscriptions(
+    hours_before_expiry: int = Query(24, ge=1, le=168, description="Renew subscriptions expiring within this many hours"),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually trigger renewal of expiring subscriptions.
+    This will normally run via scheduled job, but can be triggered manually.
+    """
+    try:
+        websub_service = WebSubService(db)
+        result = websub_service.renew_expiring_subscriptions(hours_before_expiry)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error renewing subscriptions: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

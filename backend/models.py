@@ -67,3 +67,24 @@ class TranscriptError(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     video = relationship('Video', back_populates='transcript_errors')
+
+class WebSubSubscription(Base):
+    __tablename__ = 'websub_subscriptions'
+
+    id = Column(Integer, primary_key=True)
+    channel_id = Column(Integer, ForeignKey('channels.id'), nullable=False, unique=True, index=True)
+    topic_url = Column(String(512), nullable=False)  # The YouTube feed URL
+    callback_url = Column(String(512), nullable=False)  # Our webhook endpoint
+    verify_token = Column(String(255), nullable=False)  # For hub verification
+    secret = Column(String(255), nullable=False)  # For HMAC signature verification
+    subscribed_at = Column(DateTime)
+    expires_at = Column(DateTime, index=True)  # For finding expiring subscriptions
+    lease_seconds = Column(Integer)  # How long the subscription lasts
+    status = Column(String(50), nullable=False, default='pending')  # 'pending', 'active', 'expired', 'failed'
+    last_notification_at = Column(DateTime)
+    last_error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationship
+    channel = relationship('Channel', backref='websub_subscription')

@@ -150,3 +150,29 @@ class YouTubeClient:
         except HttpError as e:
             print(f"Error resolving handle {handle}: {e}")
             return None
+
+    def get_video_details(self, video_id: str) -> Optional[Dict]:
+        """Get detailed information about a specific video"""
+        try:
+            request = self.youtube.videos().list(
+                part='snippet',
+                id=video_id
+            )
+            response = request.execute()
+
+            if not response['items']:
+                return None
+
+            video = response['items'][0]
+            snippet = video['snippet']
+
+            return {
+                'video_id': video_id,
+                'title': snippet['title'],
+                'description': snippet.get('description', ''),
+                'published_at': snippet['publishedAt'],
+                'thumbnail_url': snippet['thumbnails']['high']['url']
+            }
+        except HttpError as e:
+            print(f"Error fetching video details: {e}")
+            return None

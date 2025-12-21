@@ -8,3 +8,5 @@ youtube-transcript-api==1.2.3
 alembic==1.12.1
 websockets==12.0
 fabric>=3.0.0
+feedparser>=6.0.11
+apscheduler>=3.10.4
