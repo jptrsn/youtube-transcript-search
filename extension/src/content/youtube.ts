@@ -463,16 +463,11 @@ async function processVideo() {
 let lastVideoId: string | null = null;
 let isProcessing = false;
 let hasInitialRun = false;
-let wasOnVideoPage = false;
 
 async function checkForNewVideo() {
   const currentVideoId = getVideoId();
-  const isOnVideoPage = currentVideoId !== null;
 
-  // Process if:
-  // 1. We're on a video page AND (we weren't before OR it's a different video)
-  // 2. Not currently processing
-  if (isOnVideoPage && (!wasOnVideoPage || currentVideoId !== lastVideoId) && !isProcessing) {
+  if (currentVideoId && currentVideoId !== lastVideoId && !isProcessing) {
     console.log('New video detected:', currentVideoId);
     lastVideoId = currentVideoId;
     isProcessing = true;
@@ -481,8 +476,6 @@ async function checkForNewVideo() {
 
     isProcessing = false;
   }
-
-  wasOnVideoPage = isOnVideoPage;
 }
 
 // Listen to YouTube's SPA navigation events (only for subsequent navigations)
@@ -499,7 +492,6 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
       lastVideoId = getVideoId();
-      wasOnVideoPage = lastVideoId !== null;
       processVideo();
       hasInitialRun = true;
     }, 3000);
@@ -507,7 +499,6 @@ if (document.readyState === 'loading') {
 } else {
   setTimeout(() => {
     lastVideoId = getVideoId();
-    wasOnVideoPage = lastVideoId !== null;
     processVideo();
     hasInitialRun = true;
   }, 3000);

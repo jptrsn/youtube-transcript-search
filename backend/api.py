@@ -823,8 +823,6 @@ async def get_video_details(
 from backend.services.websub_service import WebSubService
 from fastapi import Request
 
-# Add these endpoints (I'll put them after your existing channel endpoints)
-
 @app.post("/api/webhooks/youtube")
 async def receive_webhook(request: Request, db: Session = Depends(get_db)):
     """
