@@ -45,14 +45,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="YouTube Transcript Search API",
     description="Search through YouTube video transcripts",
-    version="1.0.0",
+    version="0.1.0",
     lifespan=lifespan
 )
 
-# CORS configuration - allow all origins since it's your personal server
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your specific domain
+    allow_origins=[
+        "http://localhost:5173",
+        "https://ytscri.be",
+        "chrome-extension://your-extension-id-here"
+        ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

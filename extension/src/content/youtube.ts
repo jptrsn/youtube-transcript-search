@@ -15,6 +15,29 @@ interface VideoInfo {
   thumbnailUrl: string;
 }
 
+/**
+ * Helper to proxy fetches through the Service Worker
+ * @param {string} url - The API endpoint to hit
+ * @returns {Promise<any>} - The JSON response from the API
+ */
+function fetchFromServiceWorker(url: string, config?: any): Promise<any> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ type: "FETCH_DATA", url, config }, (response) => {
+      // 1. Check for extension runtime errors (e.g., SW not active)
+      if (chrome.runtime.lastError) {
+        return reject(new Error(chrome.runtime.lastError.message));
+      }
+
+      // 2. Check for API-specific errors passed back from the SW
+      if (response && response.error) {
+        return reject(new Error(response.error));
+      }
+
+      resolve(response);
+    });
+  });
+}
+
 // Extract video ID from URL
 function getVideoId(): string | null {
   const urlParams = new URLSearchParams(window.location.search);
@@ -366,24 +389,23 @@ async function extractTranscriptFromPanel(): Promise<TranscriptSegment[] | null>
 }
 
 // Check if video already exists and has transcript
-async function checkVideoStatus(videoId: string): Promise<{exists: boolean, hasTranscript: boolean}> {
+async function checkVideoStatus(videoId: string): Promise<{exists: boolean, hasTranscript: boolean, error?: boolean}> {
   try {
-    const response = await fetch(`${API_URL}/api/videos/${videoId}/exists`);
-    const data = await response.json();
+    const data = await fetchFromServiceWorker(`${API_URL}/api/videos/${videoId}/exists`);
     return {
       exists: data.exists === true,
       hasTranscript: data.has_transcript === true
     };
   } catch (e) {
     console.error('Error checking video status:', e);
-    return { exists: false, hasTranscript: false };
+    return { exists: false, hasTranscript: false, error: true };
   }
 }
 
 // Submit video and transcript to API
 async function submitTranscript(videoInfo: VideoInfo, transcript: TranscriptSegment[]): Promise<boolean> {
   try {
-    const response = await fetch(`${API_URL}/api/videos/submit`, {
+    await fetchFromServiceWorker(`${API_URL}/api/videos/submit`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -394,7 +416,7 @@ async function submitTranscript(videoInfo: VideoInfo, transcript: TranscriptSegm
       })
     });
 
-    return response.ok;
+    return true;
   } catch (e) {
     console.error('Error submitting transcript:', e);
     return false;
@@ -421,9 +443,9 @@ async function processVideo() {
     return;
   }
 
-  if (status.exists && !status.hasTranscript) {
+  if (status.exists && !status.hasTranscript && !status.error) {
     console.log('Video exists but missing transcript, fetching...');
-  } else {
+  } else if (!status.error) {
     console.log('New video, fetching transcript...');
   }
 

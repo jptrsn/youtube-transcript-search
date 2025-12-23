@@ -1,7 +1,7 @@
 {
   "name": "YouTube Transcript Search",
+  "version": "0.1.0",
   "host_permissions": [
-    "https://youtu.be/*",
     "https://www.youtube.com/*",
     "https://ytscri.be/*"
   ],

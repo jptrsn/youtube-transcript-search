@@ -46,7 +46,7 @@ async function preloadIcons() {
 preloadIcons();
 
 // Listen for messages from content scripts
-chrome.runtime.onMessage.addListener((message, sender) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'UPDATE_ICON') {
     const tabId = sender.tab?.id;
     if (!tabId) return;
@@ -81,6 +81,13 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         console.error('Failed to set default icon:', err);
       });
     }
+  }
+  if (message.type === "FETCH_DATA") {
+    fetch(message.url, message.config)
+      .then(res => res.json())
+      .then(data => sendResponse(data))
+      .catch(err => sendResponse({error: err.message}));
+    return true; // Keeps the message channel open for async response
   }
 });
 
