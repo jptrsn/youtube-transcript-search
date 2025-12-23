@@ -238,7 +238,7 @@
 				{#if $extensionInstalled}
 					<div class="fetch-transcript-card">
 						<h3>📝 No transcript available yet</h3>
-						<p>Use the extension to fetch the transcript for this video right now.</p>
+						<p>Use the extension to fetch the transcript for this video right now by opening a tab in the background of your browser.</p>
 
 						{#if fetchingTranscript}
 							<div class="fetching-status">
