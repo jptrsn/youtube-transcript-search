@@ -39,6 +39,7 @@ services:
       dockerfile: ./frontend/Dockerfile
       args:
         PUBLIC_API_URL: ${PUBLIC_API_URL}
+        PUBLIC_CHROME_EXTENSION_ID: ${PUBLIC_CHROME_EXTENSION_ID}
     container_name: yt-transcript-frontend
     environment:
       ORIGIN: ${FRONTEND_ORIGIN}

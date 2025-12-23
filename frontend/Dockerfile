@@ -2,8 +2,8 @@ FROM node:22-alpine AS builder
 
 WORKDIR /build
 
-# Copy root .env.prod and rename it to what Vite expects in production mode
-COPY .env.prod ./.env.production
+# Copy root .env.prod
+COPY .env.prod ../.env.prod
 
 # Copy frontend package files
 COPY frontend/package*.json ./
