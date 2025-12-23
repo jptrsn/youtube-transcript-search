@@ -1,1 +1,1 @@
-export const API_URL = process.env.PUBLIC_API_URL || 'https://ytscri.be';
+export const API_URL = process.env.PUBLIC_API_URL || 'http://localhost:8000';

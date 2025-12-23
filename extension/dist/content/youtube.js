@@ -1,1 +1,516 @@
-(()=>{"use strict";const t="https://ytscri.be";function e(){return new URLSearchParams(window.location.search).get("v")}function n(t){chrome.runtime.sendMessage({type:"UPDATE_ICON",success:t})}async function o(){const o=e();if(!o)return;const r=await async function(e){try{const n=await fetch(`${t}/api/videos/${e}/exists`),o=await n.json();return{exists:!0===o.exists,hasTranscript:!0===o.has_transcript}}catch(t){return console.error("Error checking video status:",t),{exists:!1,hasTranscript:!1}}}(o);if(r.exists&&r.hasTranscript)return void console.log("Video already has transcript in database");r.exists&&!r.hasTranscript?console.log("Video exists but missing transcript, fetching..."):console.log("New video, fetching transcript...");const s=function(){try{const t=document.querySelectorAll("script");for(const e of t){const t=e.textContent||"";if(t.includes("ytInitialData")){const e=t.match(/"channelId":"([^"]+)"/);if(e)return e[1]}}}catch(t){console.error("Error extracting channel ID:",t)}return null}();if(!s)return void console.log("Could not extract channel ID");const c=await async function(t,e){for(let n=0;n<10;n++){try{const n=document.querySelectorAll("script");for(const o of n){const n=o.textContent||"";if(n.includes("ytInitialData")){const o=n.match(/ytInitialData\s*=\s*({.+?});/s);if(o){const n=JSON.parse(o[1]),r=n?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.[0]?.videoPrimaryInfoRenderer;if(r){const o=r.title?.runs?.[0]?.text||"",s=n?.engagementPanels?.find(t=>t.engagementPanelSectionListRenderer?.content?.structuredDescriptionContentRenderer)?.engagementPanelSectionListRenderer?.content?.structuredDescriptionContentRenderer?.items?.[1]?.expandableVideoDescriptionBodyRenderer?.attributedDescriptionBodyText?.content||"",c=`https://i.ytimg.com/vi/${t}/maxresdefault.jpg`;return{videoId:t,channelId:e,title:o,description:s,publishedAt:(new Date).toISOString(),thumbnailUrl:c}}}}}}catch(t){console.log(`Attempt ${n+1} failed:`,t)}await new Promise(t=>setTimeout(t,300))}return console.error("Failed to get video info after 10 attempts"),null}(o,s);if(!c)return void console.log("Could not extract video info");let i=await async function(t){try{const e=function(){try{const t=document.querySelectorAll("script");for(const e of t){const t=(e.textContent||"").match(/"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"/);if(t)return t[1]}return console.log("No InnerTube API key found in page scripts"),null}catch(t){return console.error("Error extracting API key:",t),null}}();if(!e)return console.log("Could not extract API key, falling back to UI method"),null;const n=await async function(t,e){try{const n=`https://www.youtube.com/youtubei/v1/player?key=${e}`,o={context:{client:{clientName:"WEB",clientVersion:"2.20241212.01.00"}},videoId:t},r=await fetch(n,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)});if(!r.ok){const t=await r.text();return console.error("InnerTube API request failed:",r.status),console.error("Error response:",t),null}const s=await r.json(),c=s?.captions?.playerCaptionsTracklistRenderer;return c&&c.captionTracks?c:(console.log("No captions available for video"),null)}catch(t){return console.error("Error fetching captions JSON:",t),null}}(t,e);if(!n)return console.log("Could not fetch captions JSON, falling back to UI method"),null;const o=function(t){try{const e=t.captionTracks,n=["en","en-US","en-GB"];for(const t of n){const n=e.find(e=>e.languageCode===t&&"asr"!==e.kind);if(n)return n.baseUrl}for(const t of n){const n=e.find(e=>e.languageCode===t&&"asr"===e.kind);if(n)return n.baseUrl}return null}catch(t){return console.error("Error finding English transcript URL:",t),null}}(n);return o?await async function(t){try{const e=await fetch(t);if(!e.ok)return console.error("Failed to fetch transcript XML:",e.status),null;const n=await e.text(),o=(new DOMParser).parseFromString(n,"text/xml"),r=o.querySelector("parsererror");if(r)return console.error("XML parsing error:",r.textContent),null;const s=o.querySelectorAll("text"),c=[];return s.forEach(t=>{const e=t.textContent||"",n=parseFloat(t.getAttribute("start")||"0"),o=parseFloat(t.getAttribute("dur")||"0");e&&c.push({text:e,start:n,duration:o})}),c.length>0?c:null}catch(t){return console.error("Error fetching/parsing transcript:",t),null}}(o)||(console.log("Could not parse transcript, falling back to UI method"),null):(console.log("No English transcript available, falling back to UI method"),null)}catch(t){return console.error("Silent transcript fetch failed:",t),null}}(o);if(i||(console.log("Silent method failed, trying UI method..."),i=await async function(){if(!await async function(){return new Promise(t=>{const e=document.querySelectorAll("button");for(const n of e){const e=n.textContent?.toLowerCase()||"";if(e.includes("show transcript")||e.includes("transcript"))return n.click(),void setTimeout(()=>t(!0),2e3)}console.log("Transcript button not found"),t(!1)})}())return console.log("Could not open transcript panel - video may not have transcript"),null;const t=await async function(){try{await new Promise(t=>setTimeout(t,1e3));const t=[],e=document.querySelectorAll("ytd-transcript-segment-renderer");return 0===e.length?null:(e.forEach(e=>{const n=e.querySelector(".segment-timestamp"),o=e.querySelector(".segment-text");if(n&&o){const e=n.textContent?.trim()||"0:00",r=o.textContent?.trim()||"",s=e.split(":").map(Number);let c=0;2===s.length?c=60*s[0]+s[1]:3===s.length&&(c=3600*s[0]+60*s[1]+s[2]),t.push({text:r,start:c,duration:0})}}),t.length>0?t:null)}catch(t){return console.error("Error extracting transcript from panel:",t),null}}();return t&&0!==t.length?t:(console.log("Could not extract transcript from panel"),null)}()),!i||0===i.length)return void console.log("Could not fetch transcript via any method");console.log("Submitting transcript...",{videoId:o,segments:i.length});const a=await async function(e,n){try{return(await fetch(`${t}/api/videos/submit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({video:e,transcript:n})})).ok}catch(t){return console.error("Error submitting transcript:",t),!1}}(c,i);a&&(console.log("Transcript submitted successfully"),n(!0),setTimeout(()=>n(!1),3e3))}let r=null,s=!1,c=!1;async function i(){const t=e();t&&t!==r&&!s&&(console.log("New video detected:",t),r=t,s=!0,await o(),s=!1)}window.addEventListener("yt-navigate-finish",()=>{c&&(console.log("YouTube navigation detected"),setTimeout(i,1e3))}),"loading"===document.readyState?document.addEventListener("DOMContentLoaded",()=>{setTimeout(()=>{r=e(),o(),c=!0},3e3)}):setTimeout(()=>{r=e(),o(),c=!0},3e3)})();
+/******/ (() => { // webpackBootstrap
+/******/ 	"use strict";
+/******/ 	var __webpack_modules__ = ({
+
+/***/ "./src/config.ts":
+/*!***********************!*\
+  !*** ./src/config.ts ***!
+  \***********************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   API_URL: () => (/* binding */ API_URL)
+/* harmony export */ });
+const API_URL = "http://localhost:8000" || 0;
+
+
+/***/ })
+
+/******/ 	});
+/************************************************************************/
+/******/ 	// The module cache
+/******/ 	var __webpack_module_cache__ = {};
+/******/ 	
+/******/ 	// The require function
+/******/ 	function __webpack_require__(moduleId) {
+/******/ 		// Check if module is in cache
+/******/ 		var cachedModule = __webpack_module_cache__[moduleId];
+/******/ 		if (cachedModule !== undefined) {
+/******/ 			return cachedModule.exports;
+/******/ 		}
+/******/ 		// Create a new module (and put it into the cache)
+/******/ 		var module = __webpack_module_cache__[moduleId] = {
+/******/ 			// no module.id needed
+/******/ 			// no module.loaded needed
+/******/ 			exports: {}
+/******/ 		};
+/******/ 	
+/******/ 		// Execute the module function
+/******/ 		__webpack_modules__[moduleId](module, module.exports, __webpack_require__);
+/******/ 	
+/******/ 		// Return the exports of the module
+/******/ 		return module.exports;
+/******/ 	}
+/******/ 	
+/************************************************************************/
+/******/ 	/* webpack/runtime/define property getters */
+/******/ 	(() => {
+/******/ 		// define getter functions for harmony exports
+/******/ 		__webpack_require__.d = (exports, definition) => {
+/******/ 			for(var key in definition) {
+/******/ 				if(__webpack_require__.o(definition, key) && !__webpack_require__.o(exports, key)) {
+/******/ 					Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+/******/ 				}
+/******/ 			}
+/******/ 		};
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/hasOwnProperty shorthand */
+/******/ 	(() => {
+/******/ 		__webpack_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/make namespace object */
+/******/ 	(() => {
+/******/ 		// define __esModule on exports
+/******/ 		__webpack_require__.r = (exports) => {
+/******/ 			if(typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+/******/ 				Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+/******/ 			}
+/******/ 			Object.defineProperty(exports, '__esModule', { value: true });
+/******/ 		};
+/******/ 	})();
+/******/ 	
+/************************************************************************/
+var __webpack_exports__ = {};
+// This entry needs to be wrapped in an IIFE because it needs to be isolated against other modules in the chunk.
+(() => {
+/*!********************************!*\
+  !*** ./src/content/youtube.ts ***!
+  \********************************/
+__webpack_require__.r(__webpack_exports__);
+/* harmony import */ var _config__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../config */ "./src/config.ts");
+
+// Extract video ID from URL
+function getVideoId() {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('v');
+}
+// Extract channel ID from page data
+function getChannelId() {
+    try {
+        const scripts = document.querySelectorAll('script');
+        for (const script of scripts) {
+            const content = script.textContent || '';
+            if (content.includes('ytInitialData')) {
+                const match = content.match(/"channelId":"([^"]+)"/);
+                if (match)
+                    return match[1];
+            }
+        }
+    }
+    catch (e) {
+        console.error('Error extracting channel ID:', e);
+    }
+    return null;
+}
+// Extract video metadata from ytInitialData (updates on navigation)
+async function getVideoInfo(videoId, channelId) {
+    // Try up to 10 times with 300ms delay
+    for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+            const scripts = document.querySelectorAll('script');
+            for (const script of scripts) {
+                const content = script.textContent || '';
+                if (content.includes('ytInitialData')) {
+                    // Extract from ytInitialData instead
+                    const match = content.match(/ytInitialData\s*=\s*({.+?});/s);
+                    if (match) {
+                        const data = JSON.parse(match[1]);
+                        // Navigate to the video details in ytInitialData
+                        const videoData = data?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.[0]?.videoPrimaryInfoRenderer;
+                        if (videoData) {
+                            const title = videoData.title?.runs?.[0]?.text || '';
+                            const description = data?.engagementPanels?.find((p) => p.engagementPanelSectionListRenderer?.content?.structuredDescriptionContentRenderer)?.engagementPanelSectionListRenderer?.content?.structuredDescriptionContentRenderer?.items?.[1]?.expandableVideoDescriptionBodyRenderer?.attributedDescriptionBodyText?.content || '';
+                            const thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
+                            return {
+                                videoId,
+                                channelId,
+                                title,
+                                description,
+                                publishedAt: new Date().toISOString(),
+                                thumbnailUrl
+                            };
+                        }
+                    }
+                }
+            }
+        }
+        catch (e) {
+            console.log(`Attempt ${attempt + 1} failed:`, e);
+        }
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    console.error('Failed to get video info after 10 attempts');
+    return null;
+}
+// Extract InnerTube API key from page scripts
+function extractInnertubeApiKey() {
+    try {
+        const scripts = document.querySelectorAll('script');
+        for (const script of scripts) {
+            const content = script.textContent || '';
+            const match = content.match(/"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"/);
+            if (match) {
+                return match[1];
+            }
+        }
+        console.log('No InnerTube API key found in page scripts');
+        return null;
+    }
+    catch (e) {
+        console.error('Error extracting API key:', e);
+        return null;
+    }
+}
+// Fetch captions JSON from YouTube's InnerTube API
+async function fetchCaptionsJson(videoId, apiKey) {
+    try {
+        const url = `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`;
+        const requestBody = {
+            context: {
+                client: {
+                    clientName: 'WEB',
+                    clientVersion: '2.20241212.01.00'
+                }
+            },
+            videoId: videoId,
+        };
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('InnerTube API request failed:', response.status);
+            console.error('Error response:', errorText);
+            return null;
+        }
+        const data = await response.json();
+        // Check if captions are available
+        const captions = data?.captions?.playerCaptionsTracklistRenderer;
+        if (!captions || !captions.captionTracks) {
+            console.log('No captions available for video');
+            return null;
+        }
+        return captions;
+    }
+    catch (e) {
+        console.error('Error fetching captions JSON:', e);
+        return null;
+    }
+}
+// Find English transcript URL from captions JSON
+function findEnglishTranscriptUrl(captionsJson) {
+    try {
+        const captionTracks = captionsJson.captionTracks;
+        // Look for English transcripts (manual first, then auto-generated)
+        const englishCodes = ['en', 'en-US', 'en-GB'];
+        // Try to find manually created English transcript first
+        for (const code of englishCodes) {
+            const manual = captionTracks.find((track) => track.languageCode === code && track.kind !== 'asr');
+            if (manual) {
+                return manual.baseUrl;
+            }
+        }
+        // Fall back to auto-generated English transcript
+        for (const code of englishCodes) {
+            const auto = captionTracks.find((track) => track.languageCode === code && track.kind === 'asr');
+            if (auto) {
+                return auto.baseUrl;
+            }
+        }
+        return null;
+    }
+    catch (e) {
+        console.error('Error finding English transcript URL:', e);
+        return null;
+    }
+}
+// Fetch and parse transcript XML
+async function fetchAndParseTranscript(url) {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.error('Failed to fetch transcript XML:', response.status);
+            return null;
+        }
+        const xmlText = await response.text();
+        // Parse XML using DOMParser
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+        // Check for parsing errors
+        const parseError = xmlDoc.querySelector('parsererror');
+        if (parseError) {
+            console.error('XML parsing error:', parseError.textContent);
+            return null;
+        }
+        // Extract transcript segments
+        const textElements = xmlDoc.querySelectorAll('text');
+        const segments = [];
+        // Create a temporary element to decode HTML entities
+        const decodeElement = document.createElement('textarea');
+        textElements.forEach(element => {
+            const rawText = element.textContent || '';
+            // Decode HTML entities
+            decodeElement.innerHTML = rawText;
+            const text = decodeElement.value;
+            const start = parseFloat(element.getAttribute('start') || '0');
+            const duration = parseFloat(element.getAttribute('dur') || '0');
+            if (text) {
+                segments.push({ text, start, duration });
+            }
+        });
+        return segments.length > 0 ? segments : null;
+    }
+    catch (e) {
+        console.error('Error fetching/parsing transcript:', e);
+        return null;
+    }
+}
+// Main function to fetch transcript silently via API
+async function fetchTranscriptSilently(videoId) {
+    try {
+        // Step 1: Extract API key from page
+        const apiKey = extractInnertubeApiKey();
+        if (!apiKey) {
+            console.log('Could not extract API key, falling back to UI method');
+            return null;
+        }
+        // Step 2: Fetch captions JSON from InnerTube API
+        const captionsJson = await fetchCaptionsJson(videoId, apiKey);
+        if (!captionsJson) {
+            console.log('Could not fetch captions JSON, falling back to UI method');
+            return null;
+        }
+        // Step 3: Find English transcript URL
+        const transcriptUrl = findEnglishTranscriptUrl(captionsJson);
+        if (!transcriptUrl) {
+            console.log('No English transcript available, falling back to UI method');
+            return null;
+        }
+        // Step 4: Fetch and parse transcript XML
+        const transcript = await fetchAndParseTranscript(transcriptUrl);
+        if (!transcript) {
+            console.log('Could not parse transcript, falling back to UI method');
+            return null;
+        }
+        return transcript;
+    }
+    catch (e) {
+        console.error('Silent transcript fetch failed:', e);
+        return null;
+    }
+}
+// Fetch transcript by opening UI panel and scraping DOM (fallback method)
+async function fetchTranscriptFromUI() {
+    // Open transcript panel
+    const panelOpened = await openTranscriptPanel();
+    if (!panelOpened) {
+        console.log('Could not open transcript panel - video may not have transcript');
+        return null;
+    }
+    // Extract transcript from panel
+    const transcript = await extractTranscriptFromPanel();
+    if (!transcript || transcript.length === 0) {
+        console.log('Could not extract transcript from panel');
+        return null;
+    }
+    return transcript;
+}
+// Click the "Show transcript" button and wait for panel to load
+async function openTranscriptPanel() {
+    return new Promise((resolve) => {
+        // Look for the "Show transcript" button
+        const buttons = document.querySelectorAll('button');
+        for (const button of buttons) {
+            const text = button.textContent?.toLowerCase() || '';
+            if (text.includes('show transcript') || text.includes('transcript')) {
+                button.click();
+                // Wait for panel to appear
+                setTimeout(() => resolve(true), 2000);
+                return;
+            }
+        }
+        console.log('Transcript button not found');
+        resolve(false);
+    });
+}
+// Extract transcript from the transcript panel DOM
+async function extractTranscriptFromPanel() {
+    try {
+        // Wait a bit for the panel to fully render
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Find transcript segments in the panel
+        const segments = [];
+        // YouTube transcript items have specific selectors
+        const transcriptItems = document.querySelectorAll('ytd-transcript-segment-renderer');
+        if (transcriptItems.length === 0) {
+            return null;
+        }
+        transcriptItems.forEach(item => {
+            const timeElement = item.querySelector('.segment-timestamp');
+            const textElement = item.querySelector('.segment-text');
+            if (timeElement && textElement) {
+                const timeText = timeElement.textContent?.trim() || '0:00';
+                const text = textElement.textContent?.trim() || '';
+                // Convert timestamp to seconds
+                const parts = timeText.split(':').map(Number);
+                let seconds = 0;
+                if (parts.length === 2) {
+                    seconds = parts[0] * 60 + parts[1];
+                }
+                else if (parts.length === 3) {
+                    seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                }
+                segments.push({
+                    text,
+                    start: seconds,
+                    duration: 0 // YouTube doesn't provide duration in the panel
+                });
+            }
+        });
+        return segments.length > 0 ? segments : null;
+    }
+    catch (e) {
+        console.error('Error extracting transcript from panel:', e);
+        return null;
+    }
+}
+// Check if video already exists and has transcript
+async function checkVideoStatus(videoId) {
+    try {
+        const response = await fetch(`${_config__WEBPACK_IMPORTED_MODULE_0__.API_URL}/api/videos/${videoId}/exists`);
+        const data = await response.json();
+        return {
+            exists: data.exists === true,
+            hasTranscript: data.has_transcript === true
+        };
+    }
+    catch (e) {
+        console.error('Error checking video status:', e);
+        return { exists: false, hasTranscript: false };
+    }
+}
+// Submit video and transcript to API
+async function submitTranscript(videoInfo, transcript) {
+    try {
+        const response = await fetch(`${_config__WEBPACK_IMPORTED_MODULE_0__.API_URL}/api/videos/submit`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                video: videoInfo,
+                transcript: transcript
+            })
+        });
+        return response.ok;
+    }
+    catch (e) {
+        console.error('Error submitting transcript:', e);
+        return false;
+    }
+}
+// Update extension icon to show success
+function updateIcon(success) {
+    chrome.runtime.sendMessage({
+        type: 'UPDATE_ICON',
+        success
+    });
+}
+// Main execution
+async function processVideo() {
+    const videoId = getVideoId();
+    if (!videoId)
+        return;
+    // Check if video already exists and has transcript
+    const status = await checkVideoStatus(videoId);
+    if (status.exists && status.hasTranscript) {
+        console.log('Video already has transcript in database');
+        return;
+    }
+    if (status.exists && !status.hasTranscript) {
+        console.log('Video exists but missing transcript, fetching...');
+    }
+    else {
+        console.log('New video, fetching transcript...');
+    }
+    const channelId = getChannelId();
+    if (!channelId) {
+        console.log('Could not extract channel ID');
+        return;
+    }
+    const videoInfo = await getVideoInfo(videoId, channelId);
+    if (!videoInfo) {
+        console.log('Could not extract video info');
+        return;
+    }
+    // Try silent method first
+    let transcript = await fetchTranscriptSilently(videoId);
+    // Fallback to UI method if silent fails
+    if (!transcript) {
+        console.log('Silent method failed, trying UI method...');
+        transcript = await fetchTranscriptFromUI();
+    }
+    if (!transcript || transcript.length === 0) {
+        console.log('Could not fetch transcript via any method');
+        return;
+    }
+    console.log('Submitting transcript...', { videoId, segments: transcript.length });
+    const success = await submitTranscript(videoInfo, transcript);
+    if (success) {
+        console.log('Transcript submitted successfully');
+        updateIcon(true);
+        // Reset icon after 3 seconds
+        setTimeout(() => updateIcon(false), 3000);
+    }
+}
+// Watch for URL changes (YouTube SPA navigation)
+let lastVideoId = null;
+let isProcessing = false;
+let hasInitialRun = false;
+async function checkForNewVideo() {
+    const currentVideoId = getVideoId();
+    if (currentVideoId && currentVideoId !== lastVideoId && !isProcessing) {
+        console.log('New video detected:', currentVideoId);
+        lastVideoId = currentVideoId;
+        isProcessing = true;
+        await processVideo();
+        isProcessing = false;
+    }
+}
+// Listen to YouTube's SPA navigation events (only for subsequent navigations)
+window.addEventListener('yt-navigate-finish', () => {
+    // Only handle navigation events after initial run
+    if (hasInitialRun) {
+        console.log('YouTube navigation detected');
+        setTimeout(checkForNewVideo, 1000);
+    }
+});
+// Initial run (only once on page load)
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => {
+            lastVideoId = getVideoId();
+            processVideo();
+            hasInitialRun = true;
+        }, 3000);
+    });
+}
+else {
+    setTimeout(() => {
+        lastVideoId = getVideoId();
+        processVideo();
+        hasInitialRun = true;
+    }, 3000);
+}
+
+})();
+
+/******/ })()
+;

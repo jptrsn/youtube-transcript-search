@@ -1,1 +1,127 @@
-(()=>{"use strict";let e=null,t=null;async function c(e,t){const c=await fetch(chrome.runtime.getURL(e)),a=await c.blob(),n=await createImageBitmap(a),o=new OffscreenCanvas(t,t).getContext("2d");if(!o)throw new Error("Failed to get canvas context");return o.drawImage(n,0,0,t,t),o.getImageData(0,0,t,t)}!async function(){try{e={16:await c("icons/icon-16.png",16),48:await c("icons/icon-48.png",48),128:await c("icons/icon-128.png",128)},t={16:await c("icons/icon-success-16.png",16),48:await c("icons/icon-success-48.png",48),128:await c("icons/icon-success-128.png",128)},console.log("Icons preloaded successfully")}catch(e){console.error("Failed to preload icons:",e)}}(),chrome.runtime.onMessage.addListener((c,a)=>{if("UPDATE_ICON"===c.type){const n=a.tab?.id;if(!n)return;c.success&&t?chrome.action.setIcon({tabId:n,imageData:t}).catch(e=>{console.error("Failed to set success icon:",e)}):e&&chrome.action.setIcon({tabId:n,imageData:e}).catch(e=>{console.error("Failed to set default icon:",e)})}}),chrome.runtime.onMessageExternal.addListener((e,t,c)=>{if("PING"===e.type)return c({type:"PONG"}),!0;if("FETCH_TRANSCRIPT"===e.type){const t=e.videoId;return chrome.tabs.create({url:`https://www.youtube.com/watch?v=${t}`,active:!1},e=>{c({success:!0,message:"Processing video..."})}),!0}})})();
+/******/ (() => { // webpackBootstrap
+/******/ 	"use strict";
+/******/ 	// The require scope
+/******/ 	var __webpack_require__ = {};
+/******/ 	
+/************************************************************************/
+/******/ 	/* webpack/runtime/make namespace object */
+/******/ 	(() => {
+/******/ 		// define __esModule on exports
+/******/ 		__webpack_require__.r = (exports) => {
+/******/ 			if(typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+/******/ 				Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+/******/ 			}
+/******/ 			Object.defineProperty(exports, '__esModule', { value: true });
+/******/ 		};
+/******/ 	})();
+/******/ 	
+/************************************************************************/
+var __webpack_exports__ = {};
+/*!******************************************!*\
+  !*** ./src/background/service-worker.ts ***!
+  \******************************************/
+__webpack_require__.r(__webpack_exports__);
+// Background service worker - handles icon updates
+// We'll load icons as ImageData instead of using paths
+let defaultIconData = null;
+let successIconData = null;
+// Track tabs opened by the extension for auto-closing
+const extensionOpenedTabs = new Set();
+// Load an icon and convert to ImageData
+async function loadIcon(path, size) {
+    const response = await fetch(chrome.runtime.getURL(path));
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx = canvas.getContext('2d');
+    if (!ctx)
+        throw new Error('Failed to get canvas context');
+    ctx.drawImage(bitmap, 0, 0, size, size);
+    return ctx.getImageData(0, 0, size, size);
+}
+// Preload icons when service worker starts
+async function preloadIcons() {
+    try {
+        defaultIconData = {
+            '16': await loadIcon('icons/icon-16.png', 16),
+            '48': await loadIcon('icons/icon-48.png', 48),
+            '128': await loadIcon('icons/icon-128.png', 128)
+        };
+        successIconData = {
+            '16': await loadIcon('icons/icon-success-16.png', 16),
+            '48': await loadIcon('icons/icon-success-48.png', 48),
+            '128': await loadIcon('icons/icon-success-128.png', 128)
+        };
+        console.log('Icons preloaded successfully');
+    }
+    catch (err) {
+        console.error('Failed to preload icons:', err);
+    }
+}
+// Preload on startup
+preloadIcons();
+// Listen for messages from content scripts
+chrome.runtime.onMessage.addListener((message, sender) => {
+    if (message.type === 'UPDATE_ICON') {
+        const tabId = sender.tab?.id;
+        if (!tabId)
+            return;
+        if (message.success && successIconData) {
+            chrome.action.setIcon({
+                tabId,
+                imageData: successIconData
+            }).catch(err => {
+                console.error('Failed to set success icon:', err);
+            });
+            // After success, close the tab if it was opened by extension and not active
+            if (extensionOpenedTabs.has(tabId)) {
+                chrome.tabs.get(tabId, (tab) => {
+                    if (!tab.active) {
+                        setTimeout(() => {
+                            chrome.tabs.remove(tabId);
+                            extensionOpenedTabs.delete(tabId);
+                        }, 2000); // Give it 2 seconds to show success icon
+                    }
+                    else {
+                        // If user switched to the tab, don't auto-close
+                        extensionOpenedTabs.delete(tabId);
+                    }
+                });
+            }
+        }
+        else if (defaultIconData) {
+            chrome.action.setIcon({
+                tabId,
+                imageData: defaultIconData
+            }).catch(err => {
+                console.error('Failed to set default icon:', err);
+            });
+        }
+    }
+});
+// Listen for PING and FETCH_TRANSCRIPT messages from the web app
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+    if (message.type === 'PING') {
+        sendResponse({ type: 'PONG' });
+        return true;
+    }
+    if (message.type === 'FETCH_TRANSCRIPT') {
+        const videoId = message.videoId;
+        // Open the YouTube video in a new tab
+        chrome.tabs.create({
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            active: false // Don't switch to the tab
+        }, (tab) => {
+            if (tab.id) {
+                extensionOpenedTabs.add(tab.id);
+            }
+            // The content script will automatically process the video
+            sendResponse({ success: true, message: 'Processing video...' });
+        });
+        return true; // Will respond asynchronously
+    }
+});
+
+
+/******/ })()
+;

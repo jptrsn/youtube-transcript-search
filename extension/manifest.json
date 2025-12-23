@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Transcript Search",
+  "name": "YouTube Transcript Search (Dev)",
   "version": "1.0.0",
   "description": "Automatically capture YouTube transcripts and search across channels",
   "permissions": [
@@ -11,7 +11,8 @@
   "host_permissions": [
     "https://youtu.be/*",
     "https://www.youtube.com/*",
-    "https://ytscri.be/*"
+    "http://localhost:8000/*",
+    "http://localhost:5173/*"
   ],
   "background": {
     "service_worker": "background/service-worker.js"
@@ -25,15 +26,9 @@
   ],
   "externally_connectable": {
     "matches": [
-      "https://ytscri.be/*",
-      "http://localhost:5173/*"
+      "http://localhost:5173/*",
+      "http://localhost:8000/*"
     ]
-  },
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "your-addon@example.com",
-      "strict_min_version": "109.0"
-    }
   },
   "action": {
     "default_popup": "popup/popup.html",
