@@ -11,3 +11,4 @@ node_modules/
 postgres_data/
 alembic/versions/__pycache__/
 *.sql
+/extension/dist/
