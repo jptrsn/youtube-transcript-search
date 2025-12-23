@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { extensionInstalled, extensionChecked } from '$lib/stores/extension';
 
-	const EXTENSION_ID = 'mnpdoljijgjecimjggeiobmkepcdngim'; // Chrome extension ID
+
+	const EXTENSION_ID = import.meta.env.PUBLIC_CHROME_EXTENSION_ID;
 	// For Firefox, you'll use a different ID format when you publish
 
 	onMount(() => {

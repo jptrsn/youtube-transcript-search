@@ -5,8 +5,7 @@
 	import ChannelSearch from '$lib/components/ChannelSearch.svelte';
 	import SearchResults from '$lib/components/SearchResults.svelte';
 	import ProgressDisplay from '$lib/components/ProgressDisplay.svelte';
-
-	const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000';
+	import { getApiUrl } from '$lib/utils/api';
 
 	let channel: any = null;
 	let videos: any[] = [];
@@ -34,6 +33,7 @@
 	// Load channel data
 	async function loadChannel() {
 		console.log('loadChannel called for:', channelId);
+		const API_URL = getApiUrl();
 		loading = true;
 		error = '';
 		try {
@@ -60,6 +60,7 @@
 
 	async function autoAddChannel() {
 		try {
+			const API_URL = getApiUrl();
 			const params = new URLSearchParams({
 				channel_url: `https://youtube.com/channel/${channelId}`,
 				transcript_limit: '5'
@@ -84,6 +85,7 @@
 	}
 
 	async function performSearch(query: string) {
+		const API_URL = getApiUrl();
 		if (!query.trim()) {
 			searchResults = [];
 			snippets = {};
@@ -138,6 +140,7 @@
 	async function loadMoreResults() {
 		if (!searchQuery || loadingMore) return;
 
+		const API_URL = getApiUrl();
 		loadingMore = true;
 		searchOffset += 20;
 
@@ -194,6 +197,7 @@
 	}
 
 	function connectWebSocket(jid: string) {
+		const API_URL = getApiUrl();
 		const wsUrl = API_URL.replace('http', 'ws');
 		const ws = new WebSocket(`${wsUrl}/ws/channel-job/${jid}`);
 
@@ -222,44 +226,9 @@
 		};
 	}
 
-	async function fetchMissingTranscripts() {
-		try {
-			const res = await fetch(`${API_URL}/api/channels/${channelId}/fetch-missing-async`, {
-				method: 'POST'
-			});
-
-			if (!res.ok) throw new Error('Failed to start job');
-
-			const data = await res.json();
-			jobId = data.job_id;
-			showProgress = true;
-
-			connectWebSocket(jobId);
-		} catch (err: any) {
-			error = err.message;
-		}
-	}
-
-	async function retryFailedTranscripts() {
-		try {
-			const res = await fetch(`${API_URL}/api/channels/${channelId}/retry-failed-async`, {
-				method: 'POST'
-			});
-
-			if (!res.ok) throw new Error('Failed to start job');
-
-			const data = await res.json();
-			jobId = data.job_id;
-			showProgress = true;
-
-			connectWebSocket(jobId);
-		} catch (err: any) {
-			error = err.message;
-		}
-	}
-
 	async function checkNewVideos() {
 		try {
+			const API_URL = getApiUrl();
 			const res = await fetch(`${API_URL}/api/channels/${channelId}/check-new-async`, {
 				method: 'POST'
 			});
@@ -307,6 +276,10 @@
 		}
 	}
 </script>
+
+<svelte:head>
+	<title>{channel ? channel.channel_name : 'Channel'} - YouTube Transcript Search</title>
+</svelte:head>
 
 <div class="container">
 	{#if loading}
@@ -358,7 +331,6 @@
 						<div class="video-card">
 							<a
 								href="/watch?v={video.video_id}"
-								target="_blank"
 								class="thumbnail"
 							>
 								<img src={video.thumbnail_url} alt={video.title} />
@@ -366,7 +338,6 @@
 							<div class="video-info">
 								<a
 									href="/watch?v={video.video_id}"
-									target="_blank"
 									class="video-title"
 								>
 									{video.title}

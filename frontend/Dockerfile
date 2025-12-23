@@ -1,23 +1,23 @@
 FROM node:22-alpine AS builder
 
-WORKDIR /app
+WORKDIR /build
 
-# Copy package files
-COPY package*.json ./
+# Copy root .env.prod
+COPY .env.prod ../.env.prod
+
+# Copy frontend package files
+COPY frontend/package*.json ./
 
 # Install dependencies
 RUN npm ci
 
-# Copy source code
-COPY . .
+# Copy frontend source
+COPY frontend/ ./
 
-# Build argument for API URL
-ARG PUBLIC_API_URL=http://localhost:8000
+# Set NODE_ENV so Vite knows to look for .env.production
+ENV NODE_ENV=production
 
-# Set as environment variable for the build process
-ENV PUBLIC_API_URL=$PUBLIC_API_URL
-
-# Build the app - this bakes PUBLIC_API_URL into the client bundle
+# Build the app (Vite will read from .env.production)
 RUN npm run build
 
 # Production stage
@@ -25,10 +25,10 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Copy everything needed for production
-COPY --from=builder /app/build ./build
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
+# Copy built app
+COPY --from=builder /build/build ./build
+COPY --from=builder /build/package*.json ./
+COPY --from=builder /build/node_modules ./node_modules
 
 EXPOSE 3000
 

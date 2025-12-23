@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { PUBLIC_API_URL } from '$env/static/public';
 	import { goto } from '$app/navigation';
+	import { getApiUrl } from '$lib/utils/api';
 
 	let channels: any[] = [];
 	let filteredChannels: any[] = [];
@@ -23,11 +23,12 @@
 	}
 
 	async function loadChannels() {
+		const API_URL = getApiUrl();
 		loading = true;
 		error = '';
 
 		try {
-			const response = await fetch(`${PUBLIC_API_URL}/api/channels`);
+			const response = await fetch(`${API_URL}/api/channels`);
 			if (!response.ok) throw new Error('Failed to load channels');
 
 			const data = await response.json();

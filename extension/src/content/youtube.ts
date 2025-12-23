@@ -212,8 +212,16 @@ async function fetchAndParseTranscript(url: string): Promise<TranscriptSegment[]
     const textElements = xmlDoc.querySelectorAll('text');
     const segments: TranscriptSegment[] = [];
 
+    // Create a temporary element to decode HTML entities
+    const decodeElement = document.createElement('textarea');
+
     textElements.forEach(element => {
-      const text = element.textContent || '';
+      const rawText = element.textContent || '';
+
+      // Decode HTML entities
+      decodeElement.innerHTML = rawText;
+      const text = decodeElement.value;
+
       const start = parseFloat(element.getAttribute('start') || '0');
       const duration = parseFloat(element.getAttribute('dur') || '0');
 
@@ -481,7 +489,7 @@ window.addEventListener('yt-navigate-finish', () => {
   // Only handle navigation events after initial run
   if (hasInitialRun) {
     console.log('YouTube navigation detected');
-    setTimeout(checkForNewVideo, 1000);
+    setTimeout(checkForNewVideo, 100);
   }
 });
 

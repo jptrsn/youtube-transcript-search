@@ -21,8 +21,10 @@ rsync -avz --exclude 'node_modules' \
     --exclude '__pycache__' \
     --exclude '*.pyc' \
     --exclude '.env' \
-    --exclude '.env.prod' \
     --exclude 'db_backup_*.sql' \
+    --exclude 'extension' \
+    --exclude 'frontend/.svelte-kit' \
+    --exclude 'frontend/build' \
     ./ ${REMOTE_HOST}:${REMOTE_PATH}/
 
 # Step 2: Copy .env.prod as .env on remote

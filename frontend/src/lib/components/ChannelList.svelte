@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	import { PUBLIC_API_URL } from '$env/static/public';
 	import ProgressDisplay from './ProgressDisplay.svelte';
+	import { getApiUrl } from '$lib/utils/api';
 
 	export let channels: any[] = [];
 
@@ -12,12 +12,13 @@
 
 	async function startJob(channelId: string, operation: 'check-new' | 'retry-failed') {
 		try {
+			const API_URL = getApiUrl();
 			const endpoint =
 				operation === 'check-new'
 					? `/api/channels/${channelId}/check-new-async`
 					: `/api/channels/${channelId}/retry-failed-async`;
 
-			const response = await fetch(`${PUBLIC_API_URL}${endpoint}`, {
+			const response = await fetch(`${API_URL}${endpoint}`, {
 				method: 'POST'
 			});
 
@@ -30,7 +31,7 @@
 			activeJobs[channelId] = { type: operation, progress: [] };
 
 			// Connect to WebSocket
-			const wsUrl = `${PUBLIC_API_URL.replace('http', 'ws')}/ws/channel-job/${jobId}`;
+			const wsUrl = `${API_URL.replace('http', 'ws')}/ws/channel-job/${jobId}`;
 			const ws = new WebSocket(wsUrl);
 
       ws.onmessage = (event) => {

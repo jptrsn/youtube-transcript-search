@@ -2,8 +2,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-
-	const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000';
+	import { getApiUrl } from '$lib/utils/api';
 
 	let loading = true;
 	let error = '';
@@ -11,6 +10,7 @@
 	$: handle = $page.params.handle;
 
 	async function resolveAndRedirect() {
+		const API_URL = getApiUrl();
 		loading = true;
 		error = '';
 

@@ -1,19 +1,28 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
-
-	const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000';
+	import { goto } from '$app/navigation';
+	import { extensionInstalled } from '$lib/stores/extension';
+	import { requestTranscriptFetch } from '$lib/utils/extensionApi';
+	import ExtensionPrompt from '$lib/components/ExtensionPrompt.svelte';
+	import { getApiUrl } from '$lib/utils/api';
 
 	let video: any = null;
 	let matches: any[] = [];
 	let loading = true;
 	let error = '';
+	let fetchingTranscript = false;
+	let fetchError = '';
 
 	$: videoId = $page.url.searchParams.get('v');
 	$: searchQuery = $page.url.searchParams.get('q') || '';
 
+	// Track previous values to detect changes
+	let prevVideoId: string | null = null;
+	let prevSearchQuery: string = '';
+
 	async function loadVideo() {
+		const API_URL = getApiUrl();
 		if (!videoId) {
 			error = 'No video ID provided';
 			loading = false;
@@ -59,40 +68,99 @@
 		return `${mins}:${secs.toString().padStart(2, '0')}`;
 	}
 
+	async function handleFetchTranscript() {
+		if (!videoId) return;
+
+		fetchingTranscript = true;
+		fetchError = '';
+
+		const result = await requestTranscriptFetch(videoId);
+
+		if (result.success) {
+			// Poll the API to check if transcript is ready
+			pollForTranscript();
+		} else {
+			fetchError = result.message || 'Failed to fetch transcript';
+			fetchingTranscript = false;
+		}
+	}
+
+	async function pollForTranscript() {
+		const API_URL = getApiUrl();
+		if (!videoId) return;
+
+		// Poll every 2 seconds for up to 60 seconds
+		const maxAttempts = 30;
+		let attempts = 0;
+
+		const interval = setInterval(async () => {
+			attempts++;
+
+			try {
+				// Force cache bypass
+				const res = await fetch(`${API_URL}/api/videos/${videoId}/details?_t=${Date.now()}`, {
+					cache: 'no-store'
+				});
+
+				if (res.ok) {
+					const data = await res.json();
+					if (data.has_transcript) {
+						clearInterval(interval);
+						fetchingTranscript = false;
+						// Reload the page data
+						loadVideo();
+					}
+				}
+			} catch (err) {
+				console.error('Polling error:', err);
+			}
+
+			if (attempts >= maxAttempts) {
+				clearInterval(interval);
+				fetchingTranscript = false;
+				fetchError = 'Transcript fetch timed out. Please try again.';
+			}
+		}, 2000);
+	}
+
 	onMount(() => {
 		loadVideo();
 	});
 
-	$: if (videoId || searchQuery) {
-		loadVideo();
+	// Reload when videoId or searchQuery changes
+	$: if (videoId !== prevVideoId || searchQuery !== prevSearchQuery) {
+		prevVideoId = videoId;
+		prevSearchQuery = searchQuery;
+		if (prevVideoId !== null) { // Don't run on initial load (onMount handles that)
+			loadVideo();
+		}
 	}
 
-  let searchInput = '';
+	let searchInput = '';
+	$: searchInput = searchQuery;
 
-  $: searchInput = searchQuery;
+	function handleSearch() {
+		const url = new URL(window.location.href);
+		if (searchInput.trim()) {
+			url.searchParams.set('q', searchInput.trim());
+		} else {
+			url.searchParams.delete('q');
+		}
+		goto(url.pathname + url.search, { replaceState: false, noScroll: true });
+	}
 
-  function handleSearch() {
-    const url = new URL(window.location.href);
-    if (searchInput.trim()) {
-      url.searchParams.set('q', searchInput.trim());
-    } else {
-      url.searchParams.delete('q');
-    }
-    goto(url.pathname + url.search, { replaceState: false, noScroll: true });
-  }
+	function handleClearSearch() {
+		searchInput = '';
+		const url = new URL(window.location.href);
+		url.searchParams.delete('q');
+		goto(url.pathname + url.search, { replaceState: true, noScroll: true });
+	}
 
-  function handleClearSearch() {
-    searchInput = '';
-    const url = new URL(window.location.href);
-    url.searchParams.delete('q');
-    goto(url.pathname + url.search, { replaceState: true, noScroll: true });
-  }
-
-  function handleSearchKeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter') {
-      handleSearch();
-    }
-  }
+	function handleSearchKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter') {
+			handleSearch();
+		}
+	}
 </script>
 
 <svelte:head>
@@ -118,7 +186,7 @@
 			<h1>{video.title}</h1>
 
 			<div class="video-meta">
-        <a
+				<a
 					href="/channel/{video.channel.channel_id}"
 					class="channel-link"
 				>
@@ -127,7 +195,7 @@
 				<span class="separator">•</span>
 				<span class="date">{new Date(video.published_at).toLocaleDateString()}</span>
 				<span class="separator">•</span>
-        <a
+				<a
 					href="https://youtube.com/watch?v={video.video_id}"
 					target="_blank"
 					class="youtube-link"
@@ -137,16 +205,16 @@
 			</div>
 
 			{#if video.description}
-        <details class="description-details">
-          <summary class="description-summary">
-            <span class="description-preview">{video.description}</span>
-          </summary>
-          <p class="description-full">{video.description}</p>
-        </details>
-      {/if}
+				<details class="description-details">
+					<summary class="description-summary">
+						<span class="description-preview">{video.description}</span>
+					</summary>
+					<p class="description-full">{video.description}</p>
+				</details>
+			{/if}
 		</div>
 
-    {#if video.has_transcript}
+		{#if video.has_transcript}
 			<div class="search-container">
 				<div class="search-input-wrapper">
 					<input
@@ -174,56 +242,79 @@
 		{/if}
 
 		{#if !video.has_transcript}
-      <div class="no-transcript">
-        <p>No transcript available for this video.</p>
-      </div>
-    {:else if searchQuery && matches.length > 0}
-      <div class="matches-section">
-        <h2>Found {matches.length} {matches.length === 1 ? 'match' : 'matches'} for "{searchQuery}"</h2>
+			<div class="no-transcript-container">
+				{#if $extensionInstalled}
+					<div class="fetch-transcript-card">
+						<h3>📝 No transcript available yet</h3>
+						<p>Use the extension to fetch the transcript for this video right now by opening a tab in the background of your browser.</p>
 
-        <div class="matches-list">
-          {#each matches as match}
-            <div class="match-item">
-              <a
-                href="https://youtube.com/watch?v={video.video_id}&t={Math.floor(match.timestamp)}s"
-                target="_blank"
-                class="timestamp"
-              >
-                {formatTimestamp(match.timestamp)}
-              </a>
-              <div class="match-text">
-                {@html match.text}
-              </div>
-            </div>
-          {/each}
-        </div>
-      </div>
-    {:else if searchQuery}
-      <div class="no-matches">
-        <p>No matches found for "{searchQuery}" in this video's transcript.</p>
-      </div>
-    {:else if video.transcript}
-      <div class="transcript-section">
-        <h2>Full Transcript</h2>
+						{#if fetchingTranscript}
+							<div class="fetching-status">
+								<div class="spinner"></div>
+								<p>Fetching transcript... This may take a moment.</p>
+							</div>
+						{:else if fetchError}
+							<div class="fetch-error">{fetchError}</div>
+							<button on:click={handleFetchTranscript} class="fetch-button">
+								Try Again
+							</button>
+						{:else}
+							<button on:click={handleFetchTranscript} class="fetch-button">
+								Fetch Transcript Now
+							</button>
+						{/if}
+					</div>
+				{:else}
+					<ExtensionPrompt variant="card" message="No transcript available for this video" />
+				{/if}
+			</div>
+		{:else if searchQuery && matches.length > 0}
+			<div class="matches-section">
+				<h2>Found {matches.length} {matches.length === 1 ? 'match' : 'matches'} for "{searchQuery}"</h2>
 
-        <div class="transcript-list">
-          {#each video.transcript as segment}
-            <div class="transcript-item">
-              <a
-                href="https://youtube.com/watch?v={video.video_id}&t={Math.floor(segment.start)}s"
-                target="_blank"
-                class="timestamp"
-              >
-                {formatTimestamp(segment.start)}
-              </a>
-              <div class="transcript-text">
-                {segment.text}
-              </div>
-            </div>
-          {/each}
-        </div>
-      </div>
-    {/if}
+				<div class="matches-list">
+					{#each matches as match}
+						<div class="match-item">
+							<a
+								href="https://youtube.com/watch?v={video.video_id}&t={Math.floor(match.timestamp)}s"
+								target="_blank"
+								class="timestamp"
+							>
+								{formatTimestamp(match.timestamp)}
+							</a>
+							<div class="match-text">
+								{@html match.text}
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{:else if searchQuery}
+			<div class="no-matches">
+				<p>No matches found for "{searchQuery}" in this video's transcript.</p>
+			</div>
+		{:else if video.transcript}
+			<div class="transcript-section">
+				<h2>Full Transcript</h2>
+
+				<div class="transcript-list">
+					{#each video.transcript as segment}
+						<div class="transcript-item">
+							<a
+								href="https://youtube.com/watch?v={video.video_id}&t={Math.floor(segment.start)}s"
+								target="_blank"
+								class="timestamp"
+							>
+								{formatTimestamp(segment.start)}
+							</a>
+							<div class="transcript-text">
+								{segment.text}
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -298,7 +389,6 @@
 		text-decoration: underline;
 	}
 
-	.no-transcript,
 	.no-matches {
 		text-align: center;
 		padding: 3rem;
@@ -364,196 +454,269 @@
 		font-weight: bold;
 	}
 
-  .transcript-section {
-	margin-top: 2rem;
-}
+	.transcript-section {
+		margin-top: 2rem;
+	}
 
-.transcript-list {
-	display: flex;
-	flex-direction: column;
-	gap: 0.75rem;
-}
-
-.transcript-item {
-	display: flex;
-	gap: 1.5rem;
-	padding: 0.75rem;
-	background: #1a0f08;
-	border-left: 3px solid #8b4513;
-	transition: all 0.2s;
-}
-
-.transcript-item:hover {
-	border-left-color: #ff8c42;
-	background: #221508;
-}
-
-.transcript-text {
-	color: #d4a574;
-	line-height: 1.6;
-	flex: 1;
-}
-
-.description-details {
-	margin-top: 1rem;
-	color: #d4a574;
-}
-
-.description-summary {
-	cursor: pointer;
-	list-style: none;
-	position: relative;
-}
-
-.description-summary::-webkit-details-marker {
-	display: none;
-}
-
-.description-summary::after {
-	content: 'Show more';
-	color: #ff8c42;
-	font-size: 0.9rem;
-	margin-left: 0.5rem;
-}
-
-.description-details[open] .description-summary::after {
-	content: 'Show less';
-}
-
-.description-summary:hover::after {
-	color: #ffa500;
-	text-decoration: underline;
-}
-
-.description-preview {
-	display: -webkit-box;
-	-webkit-line-clamp: 3;
-  line-clamp: 3;
-	-webkit-box-orient: vertical;
-	overflow: hidden;
-	line-height: 1.6;
-	white-space: pre-wrap;
-}
-
-.description-details[open] .description-preview {
-	display: none;
-}
-
-.description-full {
-	margin-top: 0.5rem;
-	line-height: 1.6;
-	white-space: pre-wrap;
-}
-
-.search-container {
-	display: flex;
-	gap: 1rem;
-	margin: 2rem 0;
-	width: 100%;
-}
-
-.search-input-wrapper {
-	flex: 1;
-	position: relative;
-	display: flex;
-	align-items: center;
-}
-
-.search-input {
-	width: 100%;
-	padding: 1rem;
-	padding-right: 3.5rem;
-	background: #1a0f08;
-	color: #f4e4d4;
-	border: 3px solid #8b4513;
-	font-family: 'Courier New', monospace;
-	font-size: 1rem;
-	box-sizing: border-box;
-}
-
-.search-input:focus {
-	outline: none;
-	border-color: #ff8c42;
-}
-
-.clear-button {
-	position: absolute;
-	right: 0.75rem;
-	top: 50%;
-	transform: translateY(-50%);
-	background: #8b4513;
-	border: 2px solid #8b4513;
-	color: #f4e4d4;
-	font-size: 1.5rem;
-	line-height: 1;
-	width: 2rem;
-	height: 2rem;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	cursor: pointer;
-	transition: all 0.2s;
-	padding: 0;
-	flex-shrink: 0;
-}
-
-.clear-button:hover {
-	background: #a0522d;
-	border-color: #a0522d;
-	color: #fff;
-}
-
-.search-button {
-	padding: 1rem 2rem;
-	background: #ff8c42;
-	color: #1a0f08;
-	border: 3px solid #ff8c42;
-	font-family: 'Courier New', monospace;
-	font-size: 1rem;
-	font-weight: bold;
-	cursor: pointer;
-	transition: all 0.2s;
-	box-shadow: 4px 4px 0 #0f0805;
-	white-space: nowrap;
-	flex-shrink: 0;
-}
-
-.search-button:hover {
-	background: #ffa500;
-	border-color: #ffa500;
-	transform: translate(-2px, -2px);
-	box-shadow: 6px 6px 0 #0f0805;
-}
-
-@media (max-width: 768px) {
-	.search-container {
+	.transcript-list {
+		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
 	}
 
-	.search-button {
+	.transcript-item {
+		display: flex;
+		gap: 1.5rem;
+		padding: 0.75rem;
+		background: #1a0f08;
+		border-left: 3px solid #8b4513;
+		transition: all 0.2s;
+	}
+
+	.transcript-item:hover {
+		border-left-color: #ff8c42;
+		background: #221508;
+	}
+
+	.transcript-text {
+		color: #d4a574;
+		line-height: 1.6;
+		flex: 1;
+	}
+
+	.description-details {
+		margin-top: 1rem;
+		color: #d4a574;
+	}
+
+	.description-summary {
+		cursor: pointer;
+		list-style: none;
+		position: relative;
+	}
+
+	.description-summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.description-summary::after {
+		content: 'Show more';
+		color: #ff8c42;
+		font-size: 0.9rem;
+		margin-left: 0.5rem;
+	}
+
+	.description-details[open] .description-summary::after {
+		content: 'Show less';
+	}
+
+	.description-summary:hover::after {
+		color: #ffa500;
+		text-decoration: underline;
+	}
+
+	.description-preview {
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		line-height: 1.6;
+		white-space: pre-wrap;
+	}
+
+	.description-details[open] .description-preview {
+		display: none;
+	}
+
+	.description-full {
+		margin-top: 0.5rem;
+		line-height: 1.6;
+		white-space: pre-wrap;
+	}
+
+	.search-container {
+		display: flex;
+		gap: 1rem;
+		margin: 2rem 0;
 		width: 100%;
 	}
-}
 
-@media (max-width: 480px) {
+	.search-input-wrapper {
+		flex: 1;
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
+
 	.search-input {
-		font-size: 0.9rem;
-		padding: 0.875rem;
-		padding-right: 3rem;
+		width: 100%;
+		padding: 1rem;
+		padding-right: 3.5rem;
+		background: #1a0f08;
+		color: #f4e4d4;
+		border: 3px solid #8b4513;
+		font-family: 'Courier New', monospace;
+		font-size: 1rem;
+		box-sizing: border-box;
+	}
+
+	.search-input:focus {
+		outline: none;
+		border-color: #ff8c42;
 	}
 
 	.clear-button {
-		width: 1.75rem;
-		height: 1.75rem;
-		font-size: 1.25rem;
+		position: absolute;
+		right: 0.75rem;
+		top: 50%;
+		transform: translateY(-50%);
+		background: #8b4513;
+		border: 2px solid #8b4513;
+		color: #f4e4d4;
+		font-size: 1.5rem;
+		line-height: 1;
+		width: 2rem;
+		height: 2rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		transition: all 0.2s;
+		padding: 0;
+		flex-shrink: 0;
+	}
+
+	.clear-button:hover {
+		background: #a0522d;
+		border-color: #a0522d;
+		color: #fff;
 	}
 
 	.search-button {
-		padding: 0.875rem 1.5rem;
-		font-size: 0.9rem;
+		padding: 1rem 2rem;
+		background: #ff8c42;
+		color: #1a0f08;
+		border: 3px solid #ff8c42;
+		font-family: 'Courier New', monospace;
+		font-size: 1rem;
+		font-weight: bold;
+		cursor: pointer;
+		transition: all 0.2s;
+		box-shadow: 4px 4px 0 #0f0805;
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
-}
+
+	.search-button:hover {
+		background: #ffa500;
+		border-color: #ffa500;
+		transform: translate(-2px, -2px);
+		box-shadow: 6px 6px 0 #0f0805;
+	}
+
+	.no-transcript-container {
+		margin-top: 2rem;
+	}
+
+	.fetch-transcript-card {
+		background: #1a0f08;
+		border: 3px solid #ff8c42;
+		padding: 2rem;
+		text-align: center;
+		max-width: 600px;
+		margin: 0 auto;
+	}
+
+	.fetch-transcript-card h3 {
+		color: #ffa500;
+		margin: 0 0 1rem 0;
+	}
+
+	.fetch-transcript-card p {
+		color: #d4a574;
+		margin: 0 0 1.5rem 0;
+		line-height: 1.6;
+	}
+
+	.fetch-button {
+		padding: 1rem 2rem;
+		background: #ff8c42;
+		color: #1a0f08;
+		border: 3px solid #ff8c42;
+		font-family: 'Courier New', monospace;
+		font-size: 1.1rem;
+		font-weight: bold;
+		cursor: pointer;
+		transition: all 0.2s;
+		box-shadow: 4px 4px 0 #0f0805;
+	}
+
+	.fetch-button:hover {
+		background: #ffa500;
+		border-color: #ffa500;
+		transform: translate(-2px, -2px);
+		box-shadow: 6px 6px 0 #0f0805;
+	}
+
+	.fetching-status {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		color: #ff8c42;
+	}
+
+	.spinner {
+		width: 40px;
+		height: 40px;
+		border: 4px solid #8b4513;
+		border-top-color: #ff8c42;
+		border-radius: 50%;
+		animation: spin 1s linear infinite;
+	}
+
+	@keyframes spin {
+		to { transform: rotate(360deg); }
+	}
+
+	.fetch-error {
+		background: #8b0000;
+		color: #fff;
+		padding: 1rem;
+		margin-bottom: 1rem;
+		border: 2px solid #ff6b6b;
+	}
+
+	@media (max-width: 768px) {
+		.search-container {
+			flex-direction: column;
+			gap: 0.75rem;
+		}
+
+		.search-button {
+			width: 100%;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.search-input {
+			font-size: 0.9rem;
+			padding: 0.875rem;
+			padding-right: 3rem;
+		}
+
+		.clear-button {
+			width: 1.75rem;
+			height: 1.75rem;
+			font-size: 1.25rem;
+		}
+
+		.search-button {
+			padding: 0.875rem 1.5rem;
+			font-size: 0.9rem;
+		}
+	}
 
 	@media (max-width: 768px) {
 		.container {

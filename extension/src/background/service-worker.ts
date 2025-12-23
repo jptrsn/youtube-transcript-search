@@ -4,6 +4,9 @@
 let defaultIconData: { [size: string]: ImageData } | null = null;
 let successIconData: { [size: string]: ImageData } | null = null;
 
+// Track tabs opened by the extension for auto-closing
+const extensionOpenedTabs = new Set<number>();
+
 // Load an icon and convert to ImageData
 async function loadIcon(path: string, size: number): Promise<ImageData> {
   const response = await fetch(chrome.runtime.getURL(path));
@@ -55,6 +58,21 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       }).catch(err => {
         console.error('Failed to set success icon:', err);
       });
+
+      // After success, close the tab if it was opened by extension and not active
+      if (extensionOpenedTabs.has(tabId)) {
+        chrome.tabs.get(tabId, (tab) => {
+          if (!tab.active) {
+            setTimeout(() => {
+              chrome.tabs.remove(tabId);
+              extensionOpenedTabs.delete(tabId);
+            }, 2000); // Give it 2 seconds to show success icon
+          } else {
+            // If user switched to the tab, don't auto-close
+            extensionOpenedTabs.delete(tabId);
+          }
+        });
+      }
     } else if (defaultIconData) {
       chrome.action.setIcon({
         tabId,
@@ -66,11 +84,29 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
 });
 
-// Listen for PING messages from the web app
+// Listen for PING and FETCH_TRANSCRIPT messages from the web app
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   if (message.type === 'PING') {
     sendResponse({ type: 'PONG' });
     return true;
+  }
+
+  if (message.type === 'FETCH_TRANSCRIPT') {
+    const videoId = message.videoId;
+
+    // Open the YouTube video in a new tab
+    chrome.tabs.create({
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      active: false // Don't switch to the tab
+    }, (tab) => {
+      if (tab.id) {
+        extensionOpenedTabs.add(tab.id);
+      }
+      // The content script will automatically process the video
+      sendResponse({ success: true, message: 'Processing video...' });
+    });
+
+    return true; // Will respond asynchronously
   }
 });
 
