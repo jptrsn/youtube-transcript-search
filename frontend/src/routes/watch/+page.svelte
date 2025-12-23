@@ -1,7 +1,11 @@
 <script lang="ts">
+
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+	import { extensionInstalled } from '$lib/stores/extension';
+	import { requestTranscriptFetch } from '$lib/utils/extensionApi';
+	import ExtensionPrompt from '$lib/components/ExtensionPrompt.svelte';
 
 	const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -9,6 +13,8 @@
 	let matches: any[] = [];
 	let loading = true;
 	let error = '';
+	let fetchingTranscript = false;
+	let fetchError = '';
 
 	$: videoId = $page.url.searchParams.get('v');
 	$: searchQuery = $page.url.searchParams.get('q') || '';
@@ -57,6 +63,60 @@
 			return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 		}
 		return `${mins}:${secs.toString().padStart(2, '0')}`;
+	}
+
+	async function handleFetchTranscript() {
+		if (!videoId) return;
+
+		fetchingTranscript = true;
+		fetchError = '';
+
+		const result = await requestTranscriptFetch(videoId);
+
+		if (result.success) {
+			// Poll the API to check if transcript is ready
+			pollForTranscript();
+		} else {
+			fetchError = result.message || 'Failed to fetch transcript';
+			fetchingTranscript = false;
+		}
+	}
+
+	async function pollForTranscript() {
+		if (!videoId) return;
+
+		// Poll every 2 seconds for up to 60 seconds
+		const maxAttempts = 30;
+		let attempts = 0;
+
+		const interval = setInterval(async () => {
+			attempts++;
+
+			try {
+				// Force cache bypass
+				const res = await fetch(`${API_URL}/api/videos/${videoId}/details?_t=${Date.now()}`, {
+					cache: 'no-store'
+				});
+
+				if (res.ok) {
+					const data = await res.json();
+					if (data.has_transcript) {
+						clearInterval(interval);
+						fetchingTranscript = false;
+						// Reload the page data
+						loadVideo();
+					}
+				}
+			} catch (err) {
+				console.error('Polling error:', err);
+			}
+
+			if (attempts >= maxAttempts) {
+				clearInterval(interval);
+				fetchingTranscript = false;
+				fetchError = 'Transcript fetch timed out. Please try again.';
+			}
+		}, 2000);
 	}
 
 	onMount(() => {
@@ -174,10 +234,33 @@
 		{/if}
 
 		{#if !video.has_transcript}
-      <div class="no-transcript">
-        <p>No transcript available for this video.</p>
-      </div>
-    {:else if searchQuery && matches.length > 0}
+			<div class="no-transcript-container">
+				{#if $extensionInstalled}
+					<div class="fetch-transcript-card">
+						<h3>📝 No transcript available yet</h3>
+						<p>Use the extension to fetch the transcript for this video right now.</p>
+
+						{#if fetchingTranscript}
+							<div class="fetching-status">
+								<div class="spinner"></div>
+								<p>Fetching transcript... This may take a moment.</p>
+							</div>
+						{:else if fetchError}
+							<div class="fetch-error">{fetchError}</div>
+							<button on:click={handleFetchTranscript} class="fetch-button">
+								Try Again
+							</button>
+						{:else}
+							<button on:click={handleFetchTranscript} class="fetch-button">
+								Fetch Transcript Now
+							</button>
+						{/if}
+					</div>
+				{:else}
+					<ExtensionPrompt variant="card" message="No transcript available for this video" />
+				{/if}
+			</div>
+		{:else if searchQuery && matches.length > 0}
       <div class="matches-section">
         <h2>Found {matches.length} {matches.length === 1 ? 'match' : 'matches'} for "{searchQuery}"</h2>
 
@@ -523,6 +606,79 @@
 	border-color: #ffa500;
 	transform: translate(-2px, -2px);
 	box-shadow: 6px 6px 0 #0f0805;
+}
+
+.no-transcript-container {
+	margin-top: 2rem;
+}
+
+.fetch-transcript-card {
+	background: #1a0f08;
+	border: 3px solid #ff8c42;
+	padding: 2rem;
+	text-align: center;
+	max-width: 600px;
+	margin: 0 auto;
+}
+
+.fetch-transcript-card h3 {
+	color: #ffa500;
+	margin: 0 0 1rem 0;
+}
+
+.fetch-transcript-card p {
+	color: #d4a574;
+	margin: 0 0 1.5rem 0;
+	line-height: 1.6;
+}
+
+.fetch-button {
+	padding: 1rem 2rem;
+	background: #ff8c42;
+	color: #1a0f08;
+	border: 3px solid #ff8c42;
+	font-family: 'Courier New', monospace;
+	font-size: 1.1rem;
+	font-weight: bold;
+	cursor: pointer;
+	transition: all 0.2s;
+	box-shadow: 4px 4px 0 #0f0805;
+}
+
+.fetch-button:hover {
+	background: #ffa500;
+	border-color: #ffa500;
+	transform: translate(-2px, -2px);
+	box-shadow: 6px 6px 0 #0f0805;
+}
+
+.fetching-status {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+	color: #ff8c42;
+}
+
+.spinner {
+	width: 40px;
+	height: 40px;
+	border: 4px solid #8b4513;
+	border-top-color: #ff8c42;
+	border-radius: 50%;
+	animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+	to { transform: rotate(360deg); }
+}
+
+.fetch-error {
+	background: #8b0000;
+	color: #fff;
+	padding: 1rem;
+	margin-bottom: 1rem;
+	border: 2px solid #ff6b6b;
 }
 
 @media (max-width: 768px) {

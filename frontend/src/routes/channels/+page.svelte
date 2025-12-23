@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { PUBLIC_API_URL } from '$env/static/public';
 	import ChannelList from '$lib/components/ChannelList.svelte';
 	import AddChannelForm from '$lib/components/AddChannelForm.svelte';
+
+	const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL;
 
 	let channels: any[] = [];
 	let loading = true;

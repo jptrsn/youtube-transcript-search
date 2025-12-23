@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { PUBLIC_API_URL } from '$env/static/public';
 	import { goto } from '$app/navigation';
+	const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL;
 
 	let channels: any[] = [];
 	let filteredChannels: any[] = [];

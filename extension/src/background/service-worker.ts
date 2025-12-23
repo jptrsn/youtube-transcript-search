@@ -66,11 +66,27 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
 });
 
-// Listen for PING messages from the web app
+
+// Listen for FETCH_TRANSCRIPT messages from the web app
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   if (message.type === 'PING') {
     sendResponse({ type: 'PONG' });
     return true;
+  }
+
+  if (message.type === 'FETCH_TRANSCRIPT') {
+    const videoId = message.videoId;
+
+    // Open the YouTube video in a new tab
+    chrome.tabs.create({
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      active: false // Don't switch to the tab
+    }, (tab) => {
+      // The content script will automatically process the video
+      sendResponse({ success: true, message: 'Processing video...' });
+    });
+
+    return true; // Will respond asynchronously
   }
 });
 

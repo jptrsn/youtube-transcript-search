@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	import { PUBLIC_API_URL } from '$env/static/public';
 	import ProgressDisplay from './ProgressDisplay.svelte';
 
+	const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL;
 	export let channels: any[] = [];
 
 	const dispatch = createEventDispatcher();
