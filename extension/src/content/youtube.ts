@@ -489,7 +489,7 @@ window.addEventListener('yt-navigate-finish', () => {
   // Only handle navigation events after initial run
   if (hasInitialRun) {
     console.log('YouTube navigation detected');
-    setTimeout(checkForNewVideo, 1000);
+    setTimeout(checkForNewVideo, 100);
   }
 });
 

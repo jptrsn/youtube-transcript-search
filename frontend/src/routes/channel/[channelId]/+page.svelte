@@ -222,42 +222,6 @@
 		};
 	}
 
-	async function fetchMissingTranscripts() {
-		try {
-			const res = await fetch(`${API_URL}/api/channels/${channelId}/fetch-missing-async`, {
-				method: 'POST'
-			});
-
-			if (!res.ok) throw new Error('Failed to start job');
-
-			const data = await res.json();
-			jobId = data.job_id;
-			showProgress = true;
-
-			connectWebSocket(jobId);
-		} catch (err: any) {
-			error = err.message;
-		}
-	}
-
-	async function retryFailedTranscripts() {
-		try {
-			const res = await fetch(`${API_URL}/api/channels/${channelId}/retry-failed-async`, {
-				method: 'POST'
-			});
-
-			if (!res.ok) throw new Error('Failed to start job');
-
-			const data = await res.json();
-			jobId = data.job_id;
-			showProgress = true;
-
-			connectWebSocket(jobId);
-		} catch (err: any) {
-			error = err.message;
-		}
-	}
-
 	async function checkNewVideos() {
 		try {
 			const res = await fetch(`${API_URL}/api/channels/${channelId}/check-new-async`, {
@@ -307,6 +271,10 @@
 		}
 	}
 </script>
+
+<svelte:head>
+	<title>{channel ? channel.channel_name : 'Channel'} - YouTube Transcript Search</title>
+</svelte:head>
 
 <div class="container">
 	{#if loading}
@@ -358,7 +326,6 @@
 						<div class="video-card">
 							<a
 								href="/watch?v={video.video_id}"
-								target="_blank"
 								class="thumbnail"
 							>
 								<img src={video.thumbnail_url} alt={video.title} />
@@ -366,7 +333,6 @@
 							<div class="video-info">
 								<a
 									href="/watch?v={video.video_id}"
-									target="_blank"
 									class="video-title"
 								>
 									{video.title}
