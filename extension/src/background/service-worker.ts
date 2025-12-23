@@ -66,4 +66,12 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
 });
 
+// Listen for PING messages from the web app
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  if (message.type === 'PING') {
+    sendResponse({ type: 'PONG' });
+    return true;
+  }
+});
+
 export {};

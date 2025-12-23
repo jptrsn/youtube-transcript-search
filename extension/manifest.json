@@ -23,6 +23,18 @@
       "run_at": "document_idle"
     }
   ],
+  "externally_connectable": {
+    "matches": [
+      "https://ytscri.be/*",
+      "http://localhost:5173/*"
+    ]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "your-addon@example.com",
+      "strict_min_version": "109.0"
+    }
+  },
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {
