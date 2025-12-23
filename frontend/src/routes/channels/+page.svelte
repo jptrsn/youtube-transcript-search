@@ -2,19 +2,19 @@
 	import { onMount } from 'svelte';
 	import ChannelList from '$lib/components/ChannelList.svelte';
 	import AddChannelForm from '$lib/components/AddChannelForm.svelte';
-
-	const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL;
+	import { getApiUrl } from '$lib/utils/api';
 
 	let channels: any[] = [];
 	let loading = true;
 	let error = '';
 
 	async function loadChannels() {
+		const API_URL = getApiUrl();
 		loading = true;
 		error = '';
 
 		try {
-			const response = await fetch(`${PUBLIC_API_URL}/api/channels`);
+			const response = await fetch(`${API_URL}/api/channels`);
 			if (!response.ok) throw new Error('Failed to load channels');
 
 			const data = await response.json();
@@ -152,22 +152,5 @@
 			padding: 1rem;
 		}
 
-		.channel-header {
-			flex-direction: column;
-			gap: 1rem;
-		}
-
-		.channel-stats {
-			flex-wrap: wrap;
-			gap: 1rem;
-		}
-
-		.channel-actions {
-			flex-direction: column;
-		}
-
-		.action-button {
-			width: 100%;
-		}
 	}
 </style>

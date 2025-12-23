@@ -6,8 +6,7 @@
 	import { extensionInstalled } from '$lib/stores/extension';
 	import { requestTranscriptFetch } from '$lib/utils/extensionApi';
 	import ExtensionPrompt from '$lib/components/ExtensionPrompt.svelte';
-
-	const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000';
+	import { getApiUrl } from '$lib/utils/api';
 
 	let video: any = null;
 	let matches: any[] = [];
@@ -20,6 +19,7 @@
 	$: searchQuery = $page.url.searchParams.get('q') || '';
 
 	async function loadVideo() {
+		const API_URL = getApiUrl();
 		if (!videoId) {
 			error = 'No video ID provided';
 			loading = false;
@@ -83,6 +83,7 @@
 	}
 
 	async function pollForTranscript() {
+		const API_URL = getApiUrl();
 		if (!videoId) return;
 
 		// Poll every 2 seconds for up to 60 seconds
@@ -381,7 +382,6 @@
 		text-decoration: underline;
 	}
 
-	.no-transcript,
 	.no-matches {
 		text-align: center;
 		padding: 3rem;

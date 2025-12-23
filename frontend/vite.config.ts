@@ -1,14 +1,30 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import path from 'path';
+import fs from 'fs';
 
 export default defineConfig(({ mode }) => {
-	// Load env from root directory
-	const env = loadEnv(mode, path.resolve(__dirname, '..'), '');
+	// Explicitly read the .env.prod or .env file
+	const envFile = mode === 'production' ? '.env.production' : '.env';
+	const envPath = path.resolve(__dirname, envFile);
+
+	console.log('Loading env from:', envPath);
+
+	const env: Record<string, string> = {};
+	if (fs.existsSync(envPath)) {
+		const content = fs.readFileSync(envPath, 'utf-8');
+		content.split('\n').forEach(line => {
+			const [key, ...valueParts] = line.split('=');
+			if (key && valueParts.length) {
+				env[key.trim()] = valueParts.join('=').trim();
+			}
+		});
+	}
+
+	console.log('PUBLIC_API_URL:', env.PUBLIC_API_URL);
 
 	return {
 		plugins: [sveltekit()],
-		envDir: path.resolve(__dirname, '..'), // Look for .env files in root
 		define: {
 			'import.meta.env.PUBLIC_API_URL': JSON.stringify(env.PUBLIC_API_URL || 'http://localhost:8000'),
 			'import.meta.env.PUBLIC_CHROME_EXTENSION_ID': JSON.stringify(env.PUBLIC_CHROME_EXTENSION_ID || '')

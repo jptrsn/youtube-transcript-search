@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import ProgressDisplay from './ProgressDisplay.svelte';
+	import { getApiUrl } from '$lib/utils/api';
 
-	const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL;
 	const dispatch = createEventDispatcher();
 
 	let channelUrl = '';
@@ -15,6 +15,7 @@
 	async function handleSubmit() {
 		if (!channelUrl.trim()) return;
 
+		const API_URL = getApiUrl();
 		error = '';
 		isRunning = true;
 		progress = [];
@@ -22,7 +23,7 @@
 		try {
 			// Start the job
 			const response = await fetch(
-				`${PUBLIC_API_URL}/api/channels/add-async?channel_url=${encodeURIComponent(channelUrl)}`
+				`${API_URL}/api/channels/add-async?channel_url=${encodeURIComponent(channelUrl)}`
 			, {
 				method: 'POST'
 			});
@@ -33,7 +34,7 @@
 			jobId = data.job_id;
 
 			// Connect to WebSocket for progress updates
-			const wsUrl = `${PUBLIC_API_URL.replace('http', 'ws')}/ws/channel-job/${jobId}`;
+			const wsUrl = `${API_URL.replace('http', 'ws')}/ws/channel-job/${jobId}`;
 			wsConnection = new WebSocket(wsUrl);
 
 			wsConnection.onmessage = (event) => {
