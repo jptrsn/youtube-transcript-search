@@ -8,6 +8,8 @@
     "build:chrome:prod": "cross-env TARGET_BROWSER=chrome BUILD_MODE=prod webpack && cd dist && zip -r ../youtube-transcript-search-chrome.zip .",
     "build:firefox:dev": "cross-env TARGET_BROWSER=firefox BUILD_MODE=dev webpack",
     "build:firefox:prod": "cross-env TARGET_BROWSER=firefox BUILD_MODE=prod webpack && cd dist && zip -r ../youtube-transcript-search-firefox.zip .",
+    "build:edge:dev": "cross-env TARGET_BROWSER=edge BUILD_MODE=dev webpack",
+    "build:edge:prod": "cross-env TARGET_BROWSER=edge BUILD_MODE=prod webpack && cd dist && zip -r ../youtube-transcript-search-edge.zip .",
     "watch": "webpack --watch",
     "dev": "cross-env TARGET_BROWSER=chrome BUILD_MODE=dev webpack --watch"
   },

@@ -20,7 +20,7 @@ from backend.services.websub_service import WebSubService
 from fastapi import Request
 from contextlib import asynccontextmanager
 from backend.scheduler import start_scheduler, shutdown_scheduler
-from backend.config import CHROME_EXTENSION_ID, FIREFOX_EXTENSION_ID, FRONTEND_ORIGIN
+from backend.config import CHROME_EXTENSION_ID, FIREFOX_EXTENSION_ID, EDGE_EXTENSION_ID, FRONTEND_ORIGIN
 
 import sys
 
@@ -57,7 +57,8 @@ app.add_middleware(
         "http://localhost:5173",
         FRONTEND_ORIGIN,
         f"chrome-extension://{CHROME_EXTENSION_ID}",
-        f"moz-extension://{FIREFOX_EXTENSION_ID}"
+        f"moz-extension://{FIREFOX_EXTENSION_ID}",
+        f"extension://{EDGE_EXTENSION_ID}"
         ],
     allow_credentials=True,
     allow_methods=["GET", "POST"],

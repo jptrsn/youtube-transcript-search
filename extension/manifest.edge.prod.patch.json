@@ -1,0 +1,12 @@
+{
+  "name": "YouTube Transcript Search",
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://ytscri.be/*"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://ytscri.be/*"
+    ]
+  }
+}
