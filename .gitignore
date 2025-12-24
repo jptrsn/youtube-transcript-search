@@ -12,3 +12,5 @@ postgres_data/
 alembic/versions/__pycache__/
 *.sql
 /extension/dist/
+extension/chrome-extension.pem
+extension/*.zip
