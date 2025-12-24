@@ -1,4 +1,5 @@
 import { API_URL } from '../config';
+import { isSearchUIInjected, openSearchUI } from './transcript-search';
 
 interface TranscriptSegment {
   text: string;
@@ -530,6 +531,45 @@ if (document.readyState === 'loading') {
     processVideo();
     hasInitialRun = true;
   }, 3000);
+}
+
+// Listen for messages from popup
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'CHECK_IN_PAGE_SEARCH_UI') {
+    // Check if our search UI already exists in the DOM
+    sendResponse({ exists: isSearchUIInjected() });
+    return true;
+  }
+
+  if (message.type === 'OPEN_IN_PAGE_SEARCH') {
+    // Handle opening in-page search
+    handleOpenInPageSearch(message.query)
+      .then(() => sendResponse({ success: true }))
+      .catch((error) => sendResponse({ success: false, error: error.message }));
+    return true; // Keep message channel open for async response
+  }
+
+  return false;
+});
+
+// Handle opening in-page search UI
+async function handleOpenInPageSearch(query?: string): Promise<void> {
+  console.log('Opening in-page search with query:', query);
+
+  // Check if transcript panel is already open
+  const transcriptPanel = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]');
+  const isOpen = transcriptPanel?.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED';
+
+  if (!isOpen) {
+    // Open the transcript panel
+    const opened = await openTranscriptPanel();
+    if (!opened) {
+      throw new Error('Could not open transcript panel');
+    }
+  }
+
+  // Inject search UI and perform search if query provided
+  await openSearchUI(query);
 }
 
 export {};

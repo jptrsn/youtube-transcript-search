@@ -1,0 +1,101 @@
+/* Search container */
+.ytts-search-container {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  align-items: center;
+}
+
+/* Search input */
+.ytts-search-input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--yt-spec-10-percent-layer);
+  background: transparent;
+  color: var(--yt-spec-text-primary);
+  font-size: 14px;
+  outline: none;
+  border-radius: 2px;
+  height: 32px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.ytts-search-input:focus {
+  border-color: var(--yt-spec-call-to-action);
+}
+
+.ytts-search-input::placeholder {
+  color: var(--yt-spec-text-secondary);
+}
+
+/* Search button */
+.ytts-search-button {
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  background: var(--yt-spec-10-percent-layer);
+  color: var(--yt-spec-text-primary);
+  border: 1px solid var(--yt-spec-10-percent-layer);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 2px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ytts-search-button:hover {
+  background: var(--yt-spec-badge-chip-background);
+}
+
+/* Navigation container */
+.ytts-nav-container {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Results counter */
+.ytts-results-counter {
+  font-size: 13px;
+  color: var(--yt-spec-text-primary);
+}
+
+/* Navigation buttons */
+.ytts-nav-button,
+.ytts-clear-button {
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  background: var(--yt-spec-10-percent-layer);
+  color: var(--yt-spec-text-primary);
+  border: 1px solid var(--yt-spec-10-percent-layer);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 2px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ytts-nav-button:hover,
+.ytts-clear-button:hover {
+  background: var(--yt-spec-badge-chip-background);
+}
+
+/* Highlight styles for transcript segments */
+ytd-transcript-segment-renderer.ytts-match .segment {
+  background-color: rgba(255, 255, 0, 0.3) !important;
+}
+
+ytd-transcript-segment-renderer.ytts-active-match .segment {
+  background-color: rgba(0, 255, 0, 0.3) !important;
+}
+
+/* Hide YouTube's native search box when our extension is loaded */
+ytd-transcript-search-box-renderer {
+  display: none !important;
+}

@@ -1,103 +1,172 @@
 import { API_URL } from '../config';
 
+// State
+interface PopupState {
+  isOnVideoPage: boolean;
+  videoId: string | null;
+  hasTranscript: boolean;
+  hasInPageSearch: boolean;
+  isLoading: boolean;
+}
+
+let state: PopupState = {
+  isOnVideoPage: false,
+  videoId: null,
+  hasTranscript: false,
+  hasInPageSearch: false,
+  isLoading: true
+};
+
+// DOM elements
 const searchInput = document.getElementById('searchInput') as HTMLInputElement;
 const searchButton = document.getElementById('searchButton') as HTMLButtonElement;
-const message = document.getElementById('message') as HTMLDivElement;
+const messageDiv = document.getElementById('message') as HTMLDivElement;
+const resultsDiv = document.getElementById('results') as HTMLDivElement;
+const searchForm = document.querySelector('.search-form') as HTMLDivElement;
 
-// Get current tab's channel ID
-async function getCurrentChannelId(): Promise<string | null> {
+// Extract video ID from current tab
+async function getVideoId(): Promise<string | null> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  console.log('Current tab:', tab);
+  if (!tab.url) return null;
 
-  if (!tab.url) {
-    console.log('No tab URL');
-    return null;
+  const match = tab.url.match(/youtube\.com\/watch\?v=([^&]+)/);
+  return match ? match[1] : null;
+}
+
+// Check if video has transcript via API
+async function checkTranscriptStatus(videoId: string): Promise<boolean> {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'FETCH_DATA',
+      url: `${API_URL}/api/videos/${videoId}/exists`
+    });
+
+    if (response.error) {
+      throw new Error(response.error);
+    }
+
+    return response.has_transcript === true;
+  } catch (e) {
+    console.error('Error checking transcript status:', e);
+    return false;
+  }
+}
+
+// Check if in-page search UI already exists
+async function checkInPageSearchExists(tabId: number): Promise<boolean> {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: 'CHECK_IN_PAGE_SEARCH_UI'
+    });
+
+    return response?.exists === true;
+  } catch (e) {
+    // Content script might not be ready yet
+    return false;
+  }
+}
+
+// Initialize popup state
+async function initializePopup() {
+  state.isLoading = true;
+  updateUI();
+
+  const videoId = await getVideoId();
+
+  if (!videoId) {
+    state.isOnVideoPage = false;
+    state.isLoading = false;
+    updateUI();
+    return;
   }
 
-  console.log('Tab URL:', tab.url);
+  state.isOnVideoPage = true;
+  state.videoId = videoId;
 
-  // Extract channel ID from URL patterns
-  const patterns = [
-    /youtube\.com\/channel\/([^/?]+)/,
-    /youtube\.com\/@([^/?]+)/,
-    /youtube\.com\/watch\?v=([^&]+)/  // We'll need to resolve this
-  ];
+  // Check transcript status
+  const hasTranscript = await checkTranscriptStatus(videoId);
+  state.hasTranscript = hasTranscript;
 
-  for (const pattern of patterns) {
-    const match = tab.url.match(pattern);
-    if (match) {
-      const identifier = match[1];
-
-      // If it's a handle (@username), resolve it
-      if (tab.url.includes('/@')) {
-        return await resolveHandle(identifier);
-      }
-
-      // If it's a watch URL, get channel from page
-      if (tab.url.includes('/watch')) {
-        return await getChannelFromTab(tab.id!);
-      }
-
-      return identifier;
+  if (hasTranscript) {
+    // Check if in-page search exists
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab.id) {
+      const hasInPageSearch = await checkInPageSearchExists(tab.id);
+      state.hasInPageSearch = hasInPageSearch;
     }
   }
 
-  return null;
+  state.isLoading = false;
+  updateUI();
 }
 
-// Resolve handle to channel ID
-async function resolveHandle(handle: string): Promise<string | null> {
-  try {
-    const response = await fetch(`${API_URL}/api/channels/resolve-handle/${handle}`);
-    if (!response.ok) return null;
+// Update UI based on current state
+function updateUI() {
+  // Clear results
+  resultsDiv.innerHTML = '';
 
-    const data = await response.json();
-    return data.channel_id;
-  } catch (e) {
-    console.error('Error resolving handle:', e);
-    return null;
+  if (state.isLoading) {
+    showMessage('Loading...');
+    searchForm.style.display = 'none';
+    removeAddInPageButton();
+    return;
+  }
+
+  if (!state.isOnVideoPage) {
+    showMessage('Navigate to a YouTube video to search its transcript.');
+    searchForm.style.display = 'none';
+    removeAddInPageButton();
+    return;
+  }
+
+  if (!state.hasTranscript) {
+    showMessage('This video does not have a transcript available.', true);
+    searchForm.style.display = 'none';
+    removeAddInPageButton();
+    return;
+  }
+
+  // Has transcript - show search form
+  searchForm.style.display = 'flex';
+  searchInput.placeholder = 'Search this video\'s transcript...';
+  searchButton.innerHTML = '🔍'; // Magnifying glass icon
+  searchButton.title = 'Search in Popup'; // Tooltip for accessibility
+
+  // Show/hide "Add Search In Page" button
+  if (!state.hasInPageSearch) {
+    addAddInPageButton();
+  } else {
+    removeAddInPageButton();
+  }
+
+  showMessage('');
+}
+
+// Add "Add Search In Page" button
+function addAddInPageButton() {
+  let addInPageBtn = document.getElementById('addInPageButton') as HTMLButtonElement;
+
+  if (!addInPageBtn) {
+    addInPageBtn = document.createElement('button');
+    addInPageBtn.id = 'addInPageButton';
+    addInPageBtn.className = 'secondary-button';
+    addInPageBtn.textContent = 'Add Search In Page';
+    addInPageBtn.addEventListener('click', addInPageSearch);
+    searchForm.insertAdjacentElement('afterend', addInPageBtn);
   }
 }
 
-// Get channel ID from the current tab's page
-async function getChannelFromTab(tabId: number): Promise<string | null> {
-  try {
-    console.log('Attempting to execute script in tab', tabId);
-
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        // Extract channel ID from page
-        const scripts = document.querySelectorAll('script');
-        console.log('Found scripts:', scripts.length);
-
-        for (const script of scripts) {
-          const content = script.textContent || '';
-          if (content.includes('ytInitialData')) {
-            const match = content.match(/"channelId":"([^"]+)"/);
-            if (match) {
-              console.log('Found channel ID:', match[1]);
-              return match[1];
-            }
-          }
-        }
-        console.log('No channel ID found in scripts');
-        return null;
-      }
-    });
-
-    console.log('Script execution results:', results);
-    return results[0]?.result || null;
-  } catch (e) {
-    console.error('Error getting channel from tab:', e);
-    showMessage(`Error: ${e}`, true);
-    return null;
+// Remove "Add Search In Page" button
+function removeAddInPageButton() {
+  const addInPageBtn = document.getElementById('addInPageButton');
+  if (addInPageBtn) {
+    addInPageBtn.remove();
   }
 }
 
-// Perform search
-async function performSearch() {
+// Perform search in popup (Mode 1)
+async function performPopupSearch() {
   const query = searchInput.value.trim();
 
   if (!query) {
@@ -105,36 +174,56 @@ async function performSearch() {
     return;
   }
 
-  showMessage('Getting channel info...');
+  showMessage('Searching...');
 
-  // Get channel ID fresh each time
-  const channelId = await getCurrentChannelId();
+  // TODO: Will implement in popup-search.ts next
+  showMessage('Popup search not yet implemented', true);
+}
 
-  if (!channelId) {
-    showMessage('Please navigate to a YouTube channel or video first', true);
+// Add in-page search UI (Mode 2)
+async function addInPageSearch() {
+  const query = searchInput.value.trim();
+
+  showMessage('Adding search to page...');
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab.id) {
+    showMessage('Error: Cannot communicate with page', true);
     return;
   }
 
-  // Open search results in new tab
-  const searchUrl = `${API_URL}/channel/${channelId}?q=${encodeURIComponent(query)}`;
-  chrome.tabs.create({ url: searchUrl });
+  try {
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: 'OPEN_IN_PAGE_SEARCH',
+      query: query || undefined
+    });
 
-  // Close popup
-  window.close();
+    if (response?.success) {
+      // Close popup on success
+      window.close();
+    } else {
+      showMessage(response?.error || 'Failed to add search UI', true);
+    }
+  } catch (e) {
+    showMessage(`Error: ${e}`, true);
+  }
 }
 
 // Show message to user
 function showMessage(text: string, isError: boolean = false) {
-  message.textContent = text;
-  message.className = isError ? 'message error' : 'message';
+  messageDiv.textContent = text;
+  messageDiv.className = isError ? 'message error' : 'message';
 }
 
 // Event listeners
-searchButton.addEventListener('click', performSearch);
+searchButton.addEventListener('click', performPopupSearch);
 searchInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') {
-    performSearch();
+    performPopupSearch();
   }
 });
+
+// Initialize on load
+initializePopup();
 
 export {};

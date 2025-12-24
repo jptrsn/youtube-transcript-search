@@ -24,6 +24,12 @@
       "run_at": "document_idle"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/transcript-search.css"],
+      "matches": ["https://www.youtube.com/*"]
+    }
+  ],
   "externally_connectable": {
     "matches": [
       "http://localhost:5173/*",

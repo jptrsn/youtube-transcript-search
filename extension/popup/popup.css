@@ -1,5 +1,7 @@
 body {
   width: 350px;
+  min-height: 100px;
+  max-height: 600px;
   margin: 0;
   padding: 0;
   font-family: 'Courier New', monospace;
@@ -9,6 +11,7 @@ body {
 
 .container {
   padding: 1rem;
+  overflow-y: auto;
 }
 
 h1 {
@@ -31,6 +34,7 @@ h1 {
   border: 2px solid #8b4513;
   font-family: 'Courier New', monospace;
   font-size: 0.9rem;
+  min-width: 0; /* Allow input to shrink */
 }
 
 #searchInput:focus {
@@ -39,15 +43,21 @@ h1 {
 }
 
 #searchButton {
-  padding: 0.5rem 1rem;
+  padding: 0.5rem;
+  width: 40px;
+  height: 40px;
   background: #ff8c42;
   color: #1a0f08;
   border: 2px solid #ff8c42;
   font-family: 'Courier New', monospace;
-  font-size: 0.9rem;
+  font-size: 1.2rem;
   font-weight: bold;
   cursor: pointer;
   transition: all 0.2s;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #searchButton:hover {
@@ -55,12 +65,75 @@ h1 {
   border-color: #ffa500;
 }
 
+.secondary-button {
+  width: 100%;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  color: #ff8c42;
+  border: 2px solid #ff8c42;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 0.5rem;
+}
+
+.secondary-button:hover {
+  background: #ff8c42;
+  color: #1a0f08;
+}
+
 .message {
   font-size: 0.85rem;
   color: #d4a574;
   min-height: 1.2rem;
+  word-wrap: break-word;
 }
 
 .message.error {
   color: #ff6b6b;
+}
+
+.results {
+  margin-top: 1rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.result-item {
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background: #1a0f08;
+  border: 1px solid #8b4513;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.result-item:hover {
+  border-color: #ff8c42;
+  background: #2a1810;
+}
+
+.result-timestamp {
+  color: #ffa500;
+  font-size: 0.85rem;
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+}
+
+.result-text {
+  color: #f4e4d4;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  word-wrap: break-word;
+}
+
+.message:empty {
+  display: none;
+}
+
+.results:empty {
+  display: none;
+  margin-top: 0;
 }

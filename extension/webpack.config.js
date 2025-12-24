@@ -62,6 +62,7 @@ module.exports = (env, argv) => {
           },
           { from: 'popup/popup.html', to: 'popup/popup.html' },
           { from: 'popup/popup.css', to: 'popup/popup.css' },
+          { from: 'src/content/transcript-search.css', to: 'content/transcript-search.css' },
           { from: 'icons', to: 'icons' }
         ]
       }),
