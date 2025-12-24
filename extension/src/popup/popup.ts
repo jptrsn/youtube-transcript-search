@@ -1,4 +1,6 @@
 import { API_URL } from '../config';
+import { TranscriptSegment } from '../utils/search';
+import { searchVideoTranscript, seekToTimestamp, formatTimestamp } from './popup-search';
 
 // State
 interface PopupState {
@@ -174,10 +176,67 @@ async function performPopupSearch() {
     return;
   }
 
-  showMessage('Searching...');
+  if (!state.videoId) {
+    showMessage('No video ID found', true);
+    return;
+  }
 
-  // TODO: Will implement in popup-search.ts next
-  showMessage('Popup search not yet implemented', true);
+  showMessage('Searching...');
+  resultsDiv.innerHTML = '';
+
+  try {
+    const results = await searchVideoTranscript(state.videoId, query);
+
+    if (results.length === 0) {
+      showMessage('No matches found');
+      return;
+    }
+
+    showMessage(`Found ${results.length} match${results.length === 1 ? '' : 'es'}`);
+    displayResults(results);
+  } catch (e) {
+    showMessage(`Search error: ${e}`, true);
+  }
+}
+
+// Display search results
+function displayResults(results: TranscriptSegment[]) {
+  resultsDiv.innerHTML = '';
+
+  results.forEach((result) => {
+    const resultItem = document.createElement('div');
+    resultItem.className = 'result-item';
+
+    const timestamp = document.createElement('div');
+    timestamp.className = 'result-timestamp';
+    timestamp.textContent = formatTimestamp(result.start);
+
+    const text = document.createElement('div');
+    text.className = 'result-text';
+    text.textContent = result.text;
+
+    resultItem.appendChild(timestamp);
+    resultItem.appendChild(text);
+
+    // Click handler to seek video
+    resultItem.addEventListener('click', async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) {
+        showMessage('Cannot seek video: no active tab', true);
+        return;
+      }
+
+      try {
+        await seekToTimestamp(tab.id, result.start);
+        // Close popup after seeking
+        window.close();
+      } catch (e) {
+        showMessage(`Failed to seek: ${e}`, true);
+      }
+    });
+
+    resultsDiv.appendChild(resultItem);
+  });
 }
 
 // Add in-page search UI (Mode 2)

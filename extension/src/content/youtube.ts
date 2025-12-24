@@ -417,6 +417,13 @@ async function submitTranscript(videoInfo: VideoInfo, transcript: TranscriptSegm
       })
     });
 
+    // Cache transcript in service worker
+    chrome.runtime.sendMessage({
+      type: 'SUBMIT_TRANSCRIPT',
+      videoId: videoInfo.videoId,
+      transcript: transcript
+    });
+
     return true;
   } catch (e) {
     console.error('Error submitting transcript:', e);
@@ -547,6 +554,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then(() => sendResponse({ success: true }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
     return true; // Keep message channel open for async response
+  }
+
+  if (message.type === 'SEEK_VIDEO') {
+    // Seek video to specific timestamp
+    const { timestamp } = message;
+
+    const videoElement = document.querySelector('video');
+    if (!videoElement) {
+      sendResponse({ success: false, error: 'Video element not found' });
+      return true;
+    }
+
+    videoElement.currentTime = timestamp;
+    sendResponse({ success: true });
+    return true;
   }
 
   return false;

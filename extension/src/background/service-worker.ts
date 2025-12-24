@@ -1,4 +1,72 @@
-// Background service worker - handles icon updates
+import { API_URL } from '../config';
+import { TranscriptSegment, searchTranscript } from '../utils/search';
+
+// Transcript cache with FIFO eviction
+interface CachedTranscript {
+  videoId: string;
+  transcript: TranscriptSegment[];
+}
+
+const CACHE_LIMIT = 50;
+const transcriptCache = new Map<string, TranscriptSegment[]>();
+const cacheOrder: string[] = []; // Track insertion order for FIFO
+
+/**
+ * Add transcript to cache with FIFO eviction
+ */
+function cacheTranscript(videoId: string, transcript: TranscriptSegment[]): void {
+  // If already cached, remove from order array to re-add at end
+  if (transcriptCache.has(videoId)) {
+    const index = cacheOrder.indexOf(videoId);
+    if (index > -1) {
+      cacheOrder.splice(index, 1);
+    }
+  }
+
+  // Evict oldest if at limit
+  if (transcriptCache.size >= CACHE_LIMIT && !transcriptCache.has(videoId)) {
+    const oldest = cacheOrder.shift();
+    if (oldest) {
+      transcriptCache.delete(oldest);
+    }
+  }
+
+  // Add to cache
+  transcriptCache.set(videoId, transcript);
+  cacheOrder.push(videoId);
+}
+
+/**
+ * Get transcript from cache or fetch from API
+ */
+async function getTranscript(videoId: string): Promise<TranscriptSegment[] | null> {
+  // Check cache first
+  if (transcriptCache.has(videoId)) {
+    return transcriptCache.get(videoId)!;
+  }
+
+  // Fetch from API
+  try {
+    const response = await fetch(`${API_URL}/api/videos/${videoId}/details`);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+
+    if (!data.transcript || !Array.isArray(data.transcript)) {
+      return null;
+    }
+
+    // Cache and return
+    cacheTranscript(videoId, data.transcript);
+    return data.transcript;
+  } catch (e) {
+    console.error('Error fetching transcript from API:', e);
+    return null;
+  }
+}
 
 // We'll load icons as ImageData instead of using paths
 let defaultIconData: { [size: string]: ImageData } | null = null;
@@ -82,12 +150,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     }
   }
+
   if (message.type === "FETCH_DATA") {
     fetch(message.url, message.config)
       .then(res => res.json())
       .then(data => sendResponse(data))
       .catch(err => sendResponse({error: err.message}));
     return true; // Keeps the message channel open for async response
+  }
+
+  if (message.type === 'SUBMIT_TRANSCRIPT') {
+    // Cache the transcript when content script submits it
+    const { videoId, transcript } = message;
+    if (videoId && transcript) {
+      cacheTranscript(videoId, transcript);
+      console.log(`Cached transcript for video ${videoId}`);
+    }
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'SEARCH_TRANSCRIPT') {
+    // Search transcript (lazy load from API if needed)
+    const { videoId, query } = message;
+
+    getTranscript(videoId)
+      .then(transcript => {
+        if (!transcript) {
+          sendResponse({ success: false, error: 'Transcript not found' });
+          return;
+        }
+
+        const results = searchTranscript(transcript, query);
+        sendResponse({ success: true, results });
+      })
+      .catch(err => {
+        sendResponse({ success: false, error: err.message });
+      });
+
+    return true; // Keep channel open for async response
   }
 });
 
