@@ -30,12 +30,6 @@
       "matches": ["https://www.youtube.com/*"]
     }
   ],
-  "externally_connectable": {
-    "matches": [
-      "http://localhost:5173/*",
-      "http://localhost:8000/*"
-    ]
-  },
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {

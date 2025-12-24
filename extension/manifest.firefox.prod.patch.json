@@ -1,6 +1,5 @@
 {
   "name": "YouTube Transcript Search",
-  "version": "0.1.0",
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://ytscri.be/*"
@@ -12,8 +11,11 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "your-addon@example.com",
+      "id": "youtube-transcript-search@ytscri.be",
       "strict_min_version": "109.0"
     }
+  },
+  "background": {
+    "scripts": ["background/service-worker.js"]
   }
 }

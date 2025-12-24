@@ -12,6 +12,7 @@ DB_HOST = os.getenv('DB_HOST')
 WEBSUB_CALLBACK_URL = os.getenv('WEBSUB_CALLBACK_URL')
 WEBSUB_SECRET = os.getenv('WEBSUB_SECRET')
 CHROME_EXTENSION_ID = os.getenv('PUBLIC_CHROME_EXTENSION_ID')
+FIREFOX_EXTENSION_ID = os.getenv('PUBLIC_FIREFOX_EXTENSION_ID')
 
 DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}/{POSTGRES_DB}"
 
@@ -41,3 +42,6 @@ if not WEBSUB_SECRET:
 
 if not CHROME_EXTENSION_ID:
     raise ValueError("CHROME_EXTENSION_ID not found in .env file")
+
+if not FIREFOX_EXTENSION_ID:
+    raise ValueError("FIREFOX_EXTENSION_ID not found in .env file")

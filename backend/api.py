@@ -20,6 +20,7 @@ from backend.services.websub_service import WebSubService
 from fastapi import Request
 from contextlib import asynccontextmanager
 from backend.scheduler import start_scheduler, shutdown_scheduler
+from backend.config import CHROME_EXTENSION_ID, FIREFOX_EXTENSION_ID, FRONTEND_ORIGIN
 
 import sys
 
@@ -54,8 +55,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://ytscri.be", # TODO: Replace with FRONTEND_ORIGIN env variable value
-        "chrome-extension://your-extension-id-here"  # TODO: Replace with template literal and CHROME_EXTENSION_ID env variable value
+        FRONTEND_ORIGIN,
+        f"chrome-extension://{CHROME_EXTENSION_ID}",
+        f"moz-extension://{FIREFOX_EXTENSION_ID}"
         ],
     allow_credentials=True,
     allow_methods=["GET", "POST"],

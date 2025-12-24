@@ -1,0 +1,13 @@
+{
+  "name": "YouTube Transcript Search",
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://ytscri.be/*"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://ytscri.be/*"
+    ]
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs6bsrKUOzOYTZlJLnLbiildcIOax2eMXK1zaiXHb+CMglGiuunDNd636uY13nt0YFpBXCDmnhWK0r9soV2DYMiN+Dsjf8nf+Rk7NO7qXkwMRpCZYNVxQ6q/UlKl254YdfOjTUwCeK3b2YICo7420USYWllR3Y6g3hgIrs471WZZ44AiQzv48tVLdgNorVfVrUSOWvXl/o+oLNMEyKOzMRZRkxLS1AFJ00KgQXxVHtkr3pmqC/E4xH7+qxQoPtraWSGRDOuRO2ZkQeFeLKDD4QtNR+DlbBeW8BbtCrD+/JpXlY37n99cZgGG3u9XV0lXvg/0OidkarU6K28sfgW8GDwIDAQAB"
+}

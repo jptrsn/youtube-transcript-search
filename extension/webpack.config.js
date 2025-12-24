@@ -5,7 +5,12 @@ const dotenv = require('dotenv');
 const fs = require('fs');
 
 module.exports = (env, argv) => {
-  const envFile = argv.mode === 'production' ? '../.env.prod' : '../.env';
+  // Get build mode and target browser from environment
+  const buildMode = process.env.BUILD_MODE || 'dev';
+  const targetBrowser = process.env.TARGET_BROWSER || 'chrome';
+
+  // Load appropriate .env file
+  const envFile = buildMode === 'prod' ? '../.env.prod' : '../.env';
   const envConfig = dotenv.config({ path: path.resolve(__dirname, envFile) });
 
   if (envConfig.error) {
@@ -14,9 +19,11 @@ module.exports = (env, argv) => {
 
   const API_URL = process.env.PUBLIC_API_URL || 'http://localhost:8000';
 
+  console.log(`Building for: ${targetBrowser} (${buildMode})`);
+
   return {
-    mode: argv.mode || 'development',
-    devtool: false, // Disable source maps that use eval
+    mode: buildMode === 'prod' ? 'production' : 'development',
+    devtool: false,
     entry: {
       'background/service-worker': './src/background/service-worker.ts',
       'content/youtube': './src/content/youtube.ts',
@@ -46,15 +53,18 @@ module.exports = (env, argv) => {
             from: 'manifest.json',
             to: 'manifest.json',
             transform(content) {
-              const manifest = JSON.parse(content.toString());
+              let manifest = JSON.parse(content.toString());
 
-              // Apply production patches if building for production
-              if (argv.mode === 'production') {
-                const patchPath = path.resolve(__dirname, 'manifest.prod.patch.json');
-                if (fs.existsSync(patchPath)) {
-                  const patch = JSON.parse(fs.readFileSync(patchPath, 'utf8'));
-                  Object.assign(manifest, patch);
-                }
+              // Apply browser + environment specific patch
+              const patchFile = `manifest.${targetBrowser}.${buildMode}.patch.json`;
+              const patchPath = path.resolve(__dirname, patchFile);
+
+              if (fs.existsSync(patchPath)) {
+                const patch = JSON.parse(fs.readFileSync(patchPath, 'utf8'));
+                manifest = deepMerge(manifest, patch);
+                console.log(`Applied ${patchFile}`);
+              } else {
+                console.warn(`Warning: ${patchFile} not found`);
               }
 
               return JSON.stringify(manifest, null, 2);
@@ -72,3 +82,21 @@ module.exports = (env, argv) => {
     ]
   };
 };
+
+// Deep merge utility function
+function deepMerge(target, source) {
+  const output = { ...target };
+
+  for (const key in source) {
+    if (Array.isArray(source[key])) {
+      // Replace arrays entirely instead of merging
+      output[key] = source[key];
+    } else if (source[key] instanceof Object && key in target && !Array.isArray(target[key])) {
+      output[key] = deepMerge(target[key], source[key]);
+    } else {
+      output[key] = source[key];
+    }
+  }
+
+  return output;
+}

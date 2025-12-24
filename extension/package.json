@@ -4,10 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "webpack --mode production",
-    "build:dev": "webpack --mode development",
+    "build:chrome:dev": "cross-env TARGET_BROWSER=chrome BUILD_MODE=dev webpack",
+    "build:chrome:prod": "cross-env TARGET_BROWSER=chrome BUILD_MODE=prod webpack && cd dist && zip -r ../youtube-transcript-search-chrome.zip .",
+    "build:firefox:dev": "cross-env TARGET_BROWSER=firefox BUILD_MODE=dev webpack",
+    "build:firefox:prod": "cross-env TARGET_BROWSER=firefox BUILD_MODE=prod webpack && cd dist && zip -r ../youtube-transcript-search-firefox.zip .",
     "watch": "webpack --watch",
-    "dev": "webpack --mode development --watch"
+    "dev": "cross-env TARGET_BROWSER=chrome BUILD_MODE=dev webpack --watch"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +18,7 @@
     "@types/chrome": "^0.1.31",
     "@types/node": "^24.10.1",
     "copy-webpack-plugin": "^13.0.1",
+    "cross-env": "^10.1.0",
     "dotenv-webpack": "^8.1.1",
     "ts-loader": "^9.5.4",
     "typescript": "^5.9.3",
