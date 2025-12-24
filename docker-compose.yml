@@ -20,7 +20,6 @@ services:
       dockerfile: backend/Dockerfile
     container_name: yt-transcript-backend-local
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
     ports:
       - "8000:8000"

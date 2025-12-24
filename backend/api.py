@@ -54,11 +54,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://ytscri.be",
-        "chrome-extension://your-extension-id-here"
+        "https://ytscri.be", # TODO: Replace with FRONTEND_ORIGIN env variable value
+        "chrome-extension://your-extension-id-here"  # TODO: Replace with template literal and CHROME_EXTENSION_ID env variable value
         ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
