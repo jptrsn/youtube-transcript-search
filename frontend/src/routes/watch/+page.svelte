@@ -164,7 +164,7 @@
 </script>
 
 <svelte:head>
-	<title>{video ? video.title : 'Video'} - YouTube Transcript Search</title>
+	<title>{video ? video.title : 'Video'} - YtScriBe</title>
 </svelte:head>
 
 <div class="container">

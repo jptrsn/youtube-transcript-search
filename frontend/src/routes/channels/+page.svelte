@@ -37,7 +37,7 @@
 </script>
 
 <svelte:head>
-	<title>Channels - YouTube Transcript Search</title>
+	<title>Channels - YtScriBe</title>
 </svelte:head>
 
 <main>

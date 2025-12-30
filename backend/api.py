@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 app = FastAPI(
-    title="YouTube Transcript Search API",
+    title="YtScriBe API",
     description="Search through YouTube video transcripts",
     version="0.1.0",
     lifespan=lifespan
@@ -77,7 +77,7 @@ def get_db():
 async def root():
     """API root endpoint"""
     return {
-        "message": "YouTube Transcript Search API",
+        "message": "YtScriBe API",
         "version": "1.0.0",
         "endpoints": {
             "search": "/api/search",

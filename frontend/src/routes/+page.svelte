@@ -51,13 +51,13 @@
 </script>
 
 <svelte:head>
-	<title>YouTube Transcript Search</title>
+	<title>YtScriBe</title>
 </svelte:head>
 
 <main>
 	<div class="container">
 		<header>
-			<h1>YouTube Transcript Search</h1>
+			<h1>YtScriBe</h1>
 			<p class="tagline">Search transcripts across your favorite channels</p>
 		</header>
 

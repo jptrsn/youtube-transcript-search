@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Transcript Search (Dev)",
-  "version": "0.1.0",
+  "name": "TyScriBe (Dev)",
+  "version": "0.0.1",
   "description": "Automatically capture YouTube transcripts and search across channels",
   "permissions": [
     "activeTab",

@@ -278,7 +278,7 @@
 </script>
 
 <svelte:head>
-	<title>{channel ? channel.channel_name : 'Channel'} - YouTube Transcript Search</title>
+	<title>{channel ? channel.channel_name : 'Channel'} - YtScriBe</title>
 </svelte:head>
 
 <div class="container">

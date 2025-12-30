@@ -1,5 +1,5 @@
 {
-  "name": "YouTube Transcript Search",
+  "name": "YtScriBe",
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://ytscri.be/*"

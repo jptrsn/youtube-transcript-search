@@ -1,4 +1,4 @@
-# YouTube Transcript Search
+# YtScriBe
 
 A full-stack application for searching YouTube video transcripts across channels. Automatically captures and indexes video transcripts, enabling fast search across entire channels or individual videos.
 

@@ -242,9 +242,9 @@ async function fetchAndParseTranscript(url: string): Promise<TranscriptSegment[]
     textElements.forEach(element => {
       const rawText = element.textContent || '';
 
-      // Decode HTML entities
-      decodeElement.innerHTML = rawText;
-      const text = decodeElement.value;
+      // Decode HTML entities safely
+      decodeElement.textContent = rawText;
+      const text = decodeElement.textContent || '';
 
       const start = parseFloat(element.getAttribute('start') || '0');
       const duration = parseFloat(element.getAttribute('dur') || '0');
